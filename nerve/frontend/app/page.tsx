@@ -8,6 +8,8 @@ import {
 } from "recharts";
 
 const API = "http://localhost:8000/api";
+const [reply, setReply] = useState("");
+const [chatLoading, setChatLoading] = useState(false);
 
 type Signal = {
   status: string;
@@ -125,6 +127,23 @@ export default function NerveDashboard() {
     ? [{ value: score.silent_killer_score, fill: scoreColor(score.silent_killer_score) }]
     : [];
 
+    const handleAsk = async () => {
+  if (!chat.trim()) return;
+  setChatLoading(true);
+  setReply("");
+  
+  const res = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: chat }),
+  });
+  
+  const data = await res.json();
+  setReply(data.reply);
+  setChatLoading(false);
+  setChat("");
+};
+
   if (loading) {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#0a0a0a" }}>
@@ -139,25 +158,44 @@ export default function NerveDashboard() {
   return (
     <div style={{ minHeight: "100vh", background: "#0a0a0a", color: "#f0f0f0", fontFamily: "'IBM Plex Mono', monospace" }}>
 
-      {/* HEADER */}
-      <div style={{ borderBottom: "1px solid #1a1a1a", padding: "20px 40px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div>
-          <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-1px", color: "#fff", margin: 0 }}>
-             NERVE
-          </h1>
-          <p style={{ color: "#555", fontSize: 12, margin: "4px 0 0", letterSpacing: "2px", textTransform: "uppercase" }}>
-            Autonomous D2C Financial Intelligence
-          </p>
-        </div>
-        {fivetran && (
-          <div style={{ textAlign: "right", fontSize: 11, color: "#555" }}>
-            <div style={{ color: "#639922", marginBottom: 2 }}>● Fivetran {fivetran.status}</div>
-            <div>Last sync: {fivetran.last_synced}</div>
-            <div>Next: {fivetran.next_sync}</div>
-          </div>
-        )}
-      </div>
-
+    {/* HEADER */}
+<div style={{ borderBottom: "1px solid #1a1a1a", padding: "28px 40px", display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+  <div>
+    <div style={{ display: "flex", alignItems: "baseline", gap: 16 }}>
+      <h1 style={{
+        fontSize: 72, fontWeight: 900, letterSpacing: "-4px", color: "#fff", margin: 0,
+        lineHeight: 1, fontFamily: "'IBM Plex Mono', monospace",
+        textShadow: "0 0 40px rgba(226,75,74,0.3)"
+      }}>
+        NERVE
+      </h1>
+      <div style={{
+        width: 8, height: 8, borderRadius: "50%", background: "#E24B4A",
+        marginBottom: 8, boxShadow: "0 0 12px #E24B4A", animation: "pulse 2s infinite"
+      }} />
+    </div>
+    <p style={{
+      color: "#333", fontSize: 11, margin: "6px 0 0",
+      letterSpacing: "6px", textTransform: "uppercase",
+      fontFamily: "'IBM Plex Mono', monospace"
+    }}>
+      Autonomous D2C Financial Intelligence Engine
+    </p>
+    <p style={{
+      color: "#E24B4A", fontSize: 10, margin: "4px 0 0",
+      letterSpacing: "3px", opacity: 0.7
+    }}>
+      detects hidden losses before they become disasters
+    </p>
+  </div>
+  {fivetran && (
+    <div style={{ textAlign: "right", fontSize: 11, color: "#555" }}>
+      <div style={{ color: "#639922", marginBottom: 2 }}>● Fivetran {fivetran.status}</div>
+      <div>Last sync: {fivetran.last_synced}</div>
+      <div>Next: {fivetran.next_sync}</div>
+    </div>
+  )}
+</div>
       <div style={{ padding: "32px 40px", maxWidth: 1200, margin: "0 auto" }}>
 
         {/* SILENT KILLER SCORE */}
@@ -229,60 +267,112 @@ export default function NerveDashboard() {
         )}
 
         {/* SIGNAL CARDS */}
-        {score && (
-          <div style={{ marginBottom: 40 }}>
-            <div style={{ fontSize: 11, letterSpacing: "2px", color: "#555", marginBottom: 16, textTransform: "uppercase" }}>
-              Signal Detection
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-              {Object.entries(score.signals).map(([key, sig]) => (
-                <div key={key} style={{
-                  background: "#111", border: `1px solid ${sig.status === "CRITICAL" ? "#3a1a1a" : sig.status === "WARNING" ? "#2a2010" : "#1a2a1a"}`,
-                  borderRadius: 12, padding: 20,
-                  borderLeft: `3px solid ${statusColor(sig.status)}`
-                }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                    <span style={{ fontSize: 18 }}>{signalIcons[key]}</span>
-                    <span style={{
-                      fontSize: 10, padding: "2px 8px", borderRadius: 3, fontWeight: 600, letterSpacing: "1px",
-                      background: statusBg(sig.status), color: statusColor(sig.status)
-                    }}>
-                      {sig.status}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "#ccc", marginBottom: 6 }}>
-                    {signalNames[key]}
-                  </div>
-                  <div style={{ fontSize: 11, color: "#666", lineHeight: 1.5 }}>
-                    {sig.alert}
-                  </div>
+      {/* SIGNAL CARDS */}
+{score && (
+  <div style={{ marginBottom: 40 }}>
+    <div style={{ fontSize: 11, letterSpacing: "2px", color: "#555", marginBottom: 20, textTransform: "uppercase" }}>
+      Signal Detection
+    </div>
 
-                  {/* Extra details per signal */}
-                  {key === "zombie_sku" && sig.zombies?.map((z: any) => (
-                    <div key={z.sku_id} style={{ marginTop: 8, padding: "6px 8px", background: "#1a1a1a", borderRadius: 4, fontSize: 10, color: "#888" }}>
-                      {z.product_name} · {z.days_since_sold}d dead · ₹{z.locked_capital.toLocaleString()} locked
-                    </div>
-                  ))}
-                  {key === "cash_cliff" && (
-                    <div style={{ marginTop: 8, fontSize: 11, color: "#888" }}>
-                      Runway: <span style={{ color: statusColor(sig.status) }}>{sig.runway_days} days</span>
-                      {" "}· Burn: ₹{sig.daily_burn_rate?.toLocaleString()}/day
-                    </div>
-                  )}
-                  {key === "phantom_liability" && (
-                    <div style={{ marginTop: 8 }}>
-                      {sig.platforms?.map((p: any) => (
-                        <div key={p.platform} style={{ fontSize: 10, color: "#888", marginTop: 4 }}>
-                          {p.platform}: ₹{Math.round(p.unbilled_amount).toLocaleString()} · charges {p.earliest_charge}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
+    {/* CRITICAL signals — full width horizontal */}
+    {Object.entries(score.signals)
+      .filter(([, sig]) => sig.status === "CRITICAL")
+      .map(([key, sig]) => (
+        <div key={key} style={{
+          marginBottom: 10,
+          display: "grid",
+          gridTemplateColumns: "180px 1fr auto",
+          alignItems: "center",
+          gap: 0,
+          borderRadius: 8,
+          overflow: "hidden",
+          border: "1px solid #2a0a0a",
+        }}>
+          {/* Left — name block */}
+          <div style={{
+            background: "#E24B4A",
+            padding: "20px 24px",
+            display: "flex", flexDirection: "column", justifyContent: "center",
+          }}>
+            <div style={{ fontSize: 22 }}>{signalIcons[key]}</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#fff", marginTop: 6, letterSpacing: "-0.5px" }}>
+              {signalNames[key]}
+            </div>
+            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", letterSpacing: "2px", marginTop: 2 }}>
+              CRITICAL
             </div>
           </div>
-        )}
+
+          {/* Middle — alert */}
+          <div style={{ background: "#0f0505", padding: "20px 28px" }}>
+            <div style={{ fontSize: 12, color: "#ccc", lineHeight: 1.7, marginBottom: 8 }}>
+              {sig.alert}
+            </div>
+            {key === "zombie_sku" && sig.zombies?.map((z: any) => (
+              <span key={z.sku_id} style={{
+                display: "inline-block", marginRight: 8, marginTop: 4,
+                padding: "3px 10px", borderRadius: 2,
+                background: "#1a0a0a", border: "1px solid #2a1010",
+                fontSize: 10, color: "#E24B4A"
+              }}>
+                {z.product_name} · {z.days_since_sold}d · ₹{z.locked_capital.toLocaleString()}
+              </span>
+            ))}
+            {key === "phantom_liability" && sig.platforms?.map((p: any) => (
+              <span key={p.platform} style={{
+                display: "inline-block", marginRight: 8, marginTop: 4,
+                padding: "3px 10px", borderRadius: 2,
+                background: "#1a0a0a", border: "1px solid #2a1010",
+                fontSize: 10, color: "#E24B4A"
+              }}>
+                {p.platform} · ₹{Math.round(p.unbilled_amount).toLocaleString()} · {p.earliest_charge}
+              </span>
+            ))}
+          </div>
+
+          {/* Right — severity */}
+          <div style={{
+            background: "#0f0505", padding: "20px 24px",
+            textAlign: "center", borderLeft: "1px solid #1a0808"
+          }}>
+            <div style={{ fontSize: 32, fontWeight: 900, color: "#E24B4A", lineHeight: 1 }}>
+              {sig.severity}
+            </div>
+            <div style={{ fontSize: 9, color: "#555", letterSpacing: "1px", marginTop: 2 }}>/10</div>
+          </div>
+        </div>
+      ))}
+
+    {/* WARNING + HEALTHY — compact horizontal list */}
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
+      {Object.entries(score.signals)
+        .filter(([, sig]) => sig.status !== "CRITICAL")
+        .map(([key, sig]) => (
+          <div key={key} style={{
+            display: "flex", alignItems: "center", gap: 16,
+            padding: "14px 20px",
+            background: "#0d0d0d",
+            border: `1px solid ${sig.status === "WARNING" ? "#2a2010" : "#0d1a0d"}`,
+            borderRadius: 8,
+            borderLeft: `3px solid ${statusColor(sig.status)}`,
+          }}>
+            <span style={{ fontSize: 20 }}>{signalIcons[key]}</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#aaa" }}>{signalNames[key]}</div>
+              <div style={{ fontSize: 10, color: "#555", marginTop: 2 }}>{sig.alert}</div>
+            </div>
+            <div style={{
+              fontSize: 20, fontWeight: 900,
+              color: statusColor(sig.status), minWidth: 28, textAlign: "right"
+            }}>
+              {sig.severity}
+            </div>
+          </div>
+        ))}
+    </div>
+  </div>
+)}
+        
 
         {/* WHAT-IF SIMULATOR */}
         <div style={{ marginBottom: 40, background: "#111", border: "1px solid #1e1e1e", borderRadius: 16, padding: 32 }}>
@@ -491,16 +581,27 @@ export default function NerveDashboard() {
                 fontSize: 12, fontFamily: "inherit", outline: "none"
               }}
             />
-            <button
-              onClick={() => setChat("")}
-              style={{
-                padding: "10px 20px", background: "#E24B4A", border: "none",
-                borderRadius: 8, color: "#fff", fontSize: 12, cursor: "pointer",
-                fontFamily: "inherit"
-              }}
-            >
-              Ask →
-            </button>
+          <button
+  onClick={handleAsk}
+  disabled={chatLoading}
+  style={{
+    padding: "10px 20px", background: "#E24B4A", border: "none",
+    borderRadius: 8, color: "#fff", fontSize: 12, cursor: "pointer",
+    fontFamily: "inherit", opacity: chatLoading ? 0.6 : 1
+  }}
+>
+  {chatLoading ? "..." : "Ask →"}
+</button>
+
+{reply && (
+  <div style={{
+    marginTop: 16, padding: 16, background: "#1a1a1a",
+    border: "1px solid #2a2a2a", borderRadius: 8,
+    fontSize: 12, color: "#ccc", lineHeight: 1.6
+  }}>
+    {reply}
+  </div>
+)}
           </div>
           <div style={{ marginTop: 12, fontSize: 11, color: "#444" }}>
             Ask Nerve anything about your D2C financials • Powered by Gemini 2.5 Flash

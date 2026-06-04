@@ -56,7 +56,7 @@ def detect_zombie_skus() -> dict:
         "zombies": zombies,
         "total_locked_capital": round(total_locked, 2),
         "alert": (
-            f"🧟 ZOMBIE SKU DETECTED: {len(zombies)} dead SKUs found. "
+            f" ZOMBIE SKU DETECTED: {len(zombies)} dead SKUs found. "
             f"₹{total_locked:,.0f} locked in unselling inventory. "
             f"Worst offender: '{worst['product_name']}' — "
             f"{worst['days_since_sold']} days without a single sale, "
