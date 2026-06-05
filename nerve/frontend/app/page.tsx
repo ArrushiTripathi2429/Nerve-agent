@@ -8,8 +8,7 @@ import {
 } from "recharts";
 
 const API = "http://localhost:8000/api";
-const [reply, setReply] = useState("");
-const [chatLoading, setChatLoading] = useState(false);
+
 
 type Signal = {
   status: string;
@@ -43,6 +42,8 @@ export default function NerveDashboard() {
   const [executing, setExecuting] = useState<string | null>(null);
   const [executed, setExecuted] = useState<{ [key: string]: any }>({});
   const [chat, setChat] = useState("");
+  const [reply, setReply] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
 
   useEffect(() => {
     fetchAll();
