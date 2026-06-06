@@ -2,34 +2,51 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import {
-  LineChart, Line, AreaChart, Area,
-  XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, RadialBarChart, RadialBar
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from "recharts";
 
 const API = "http://localhost:8000/api";
 
+type Signal = { status: string; severity: number; alert: string; [key: string]: any; };
+type ScoreData = { silent_killer_score: number; risk_level: string; cross_signal_reason: string | null; cross_signal_bonus: number; signals: { [key: string]: Signal }; };
+type WhatIfResult = { baseline: { runway_days: number; true_cash: number; silent_killer_score: number }; projected: { runway_days: number; true_cash: number; silent_killer_score: number; daily_burn: number; freed_capital: number }; improvement: { runway_change: number; score_change: number; cash_freed: number }; };
 
-type Signal = {
-  status: string;
-  severity: number;
-  alert: string;
-  [key: string]: any;
+const SIGNAL_META: { [key: string]: { name: string; icon: string; headline: (s: Signal) => string; subline: (s: Signal) => string; } } = {
+  zombie_sku: {
+    name: "Dead Stock Alert",
+    icon: "📦",
+    headline: (s) => s.status === "CRITICAL" ? `${s.zombies?.length || 0} products haven't sold in 30+ days` : "All products are moving. Nice work!",
+    subline: (s) => s.status === "CRITICAL" ? `You're bleeding Rs.${s.total_locked_capital?.toLocaleString()} in stock nobody wants — and still paying ads for it.` : "Your inventory is healthy with no dead stock sitting around.",
+  },
+  cash_cliff: {
+    name: "Cash Runway",
+    icon: "💸",
+    headline: (s) => s.status === "CRITICAL" ? `You'll run out of cash in ${s.runway_days} days` : s.status === "WARNING" ? `${s.runway_days} days of cash left — stay alert` : `${s.runway_days} days of cash runway. You're good.`,
+    subline: (s) => s.status === "CRITICAL" ? `At your current burn rate of Rs.${s.daily_burn_rate?.toLocaleString()}/day, the clock is ticking loud.` : s.status === "WARNING" ? "Not urgent, but now is a good time to reduce non-essential spending." : "Your cash position is comfortable. Keep monitoring monthly.",
+  },
+  margin_drift: {
+    name: "Profit Margin",
+    icon: "📉",
+    headline: (s) => s.status === "CRITICAL" ? `Your margins just fell ${Math.abs(s.drift || 0)}% in 30 days` : s.status === "WARNING" ? "Margins slipping slightly — keep an eye out" : "Your profit margins are rock solid",
+    subline: (s) => s.status === "CRITICAL" ? `From ${s.previous_margin}% down to ${s.current_margin}%. You're selling more but making less. Your ROAS dashboard is hiding this.` : "Every rupee of revenue is converting well to profit.",
+  },
+  inventory_collision: {
+    name: "Stock vs Bills",
+    icon: "⚡",
+    headline: (s) => s.status === "CRITICAL" ? `Money stuck in stock + big bill due in ${s.nearest_due_days} days` : "Your inventory and bills are in balance",
+    subline: (s) => s.status === "CRITICAL" ? `Rs.${s.locked_capital?.toLocaleString()} frozen in unsold inventory while Rs.${s.upcoming_bills?.toLocaleString()} in bills are coming. Classic cash crunch setup.` : "No dangerous overlap between your stock investment and upcoming payments.",
+  },
+  phantom_liability: {
+    name: "Hidden Ad Debt",
+    icon: "👻",
+    headline: (s) => s.status === "CRITICAL" ? `Your real cash is Rs.${s.true_cash?.toLocaleString()} — not what your bank says` : "Your ad bills are under control",
+    subline: (s) => s.status === "CRITICAL" ? `Rs.${s.total_unbilled?.toLocaleString()} in Meta/Google ads will auto-charge soon. Your bank looks fine. It's not.` : "No surprise ad charges lurking. Your balance is what it says.",
+  },
 };
 
-type ScoreData = {
-  silent_killer_score: number;
-  risk_level: string;
-  cross_signal_reason: string | null;
-  cross_signal_bonus: number;
-  signals: { [key: string]: Signal };
-};
-
-type WhatIfResult = {
-  baseline: { runway_days: number; true_cash: number; silent_killer_score: number };
-  projected: { runway_days: number; true_cash: number; silent_killer_score: number; daily_burn: number; freed_capital: number };
-  improvement: { runway_change: number; score_change: number; cash_freed: number };
-};
+const scoreColor = (s: number) => s > 60 ? "#f87171" : s > 30 ? "#fbbf24" : "#4ade80";
+const statusColor = (st: string) => st === "CRITICAL" ? "#f87171" : st === "WARNING" ? "#fbbf24" : "#4ade80";
+const statusBadge = (st: string) => st === "CRITICAL" ? "ACTION NEEDED" : st === "WARNING" ? "WATCH THIS" : "ALL GOOD";
 
 export default function NerveDashboard() {
   const [score, setScore] = useState<ScoreData | null>(null);
@@ -45,465 +62,763 @@ export default function NerveDashboard() {
   const [reply, setReply] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
 
-  useEffect(() => {
-    fetchAll();
-  }, []);
-
-  useEffect(() => {
-    runWhatIf();
-  }, [adSpend, pauseZombie, delayPayment]);
+  useEffect(() => { fetchAll(); }, []);
+  useEffect(() => { runWhatIf(); }, [adSpend, pauseZombie, delayPayment]);
 
   async function fetchAll() {
     setLoading(true);
     try {
-      const [scoreRes, fivetranRes] = await Promise.all([
-        axios.get(`${API}/score`),
-        axios.get(`${API}/fivetran/sync`),
-      ]);
-      setScore(scoreRes.data);
-      setFivetran(fivetranRes.data);
-    } catch (e) {
-      console.error(e);
-    }
+      const [s, f] = await Promise.all([axios.get(`${API}/score`), axios.get(`${API}/fivetran/sync`)]);
+      setScore(s.data); setFivetran(f.data);
+    } catch (e) { console.error(e); }
     setLoading(false);
   }
 
   async function runWhatIf() {
     try {
-      const res = await axios.post(`${API}/whatif`, {
-        ad_spend_change: adSpend,
-        return_rate_change: 0,
-        pause_zombie_sku: pauseZombie,
-        delay_payment_days: delayPayment,
-      });
+      const res = await axios.post(`${API}/whatif`, { ad_spend_change: adSpend, return_rate_change: 0, pause_zombie_sku: pauseZombie, delay_payment_days: delayPayment });
       setWhatif(res.data);
     } catch (e) {}
   }
 
-  async function executeAction(actionId: string) {
-    setExecuting(actionId);
+  async function executeAction(id: string) {
+    setExecuting(id);
     try {
-      const res = await axios.post(`${API}/execute`, {
-        action_id: actionId,
-        confirmed: true,
-      });
-      setExecuted((prev) => ({ ...prev, [actionId]: res.data }));
+      const res = await axios.post(`${API}/execute`, { action_id: id, confirmed: true });
+      setExecuted((p) => ({ ...p, [id]: res.data }));
     } catch (e) {}
     setExecuting(null);
   }
 
-  const scoreColor = (s: number) =>
-    s > 60 ? "#E24B4A" : s > 30 ? "#EF9F27" : "#639922";
-
-  const statusColor = (status: string) =>
-    status === "CRITICAL" ? "#E24B4A" : status === "WARNING" ? "#EF9F27" : "#639922";
-
-  const statusBg = (status: string) =>
-    status === "CRITICAL" ? "#FCEBEB" : status === "WARNING" ? "#FAEEDA" : "#EAF3DE";
-
-  const signalNames: { [key: string]: string } = {
-    zombie_sku: "Zombie SKU",
-    cash_cliff: "Cash Cliff",
-    margin_drift: "Margin Drift",
-    inventory_collision: "Inventory Collision",
-    phantom_liability: "Phantom Liability",
+  const handleAsk = async () => {
+    if (!chat.trim()) return;
+    setChatLoading(true); setReply("");
+    const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: chat }) });
+    const data = await res.json();
+    setReply(data.reply); setChatLoading(false); setChat("");
   };
 
-  const signalIcons: { [key: string]: string } = {
-    zombie_sku: "",
-    cash_cliff: "",
-    margin_drift: "",
-    inventory_collision: "",
-    phantom_liability: "",
-  };
-
-  const runwayData = whatif
-    ? [
-        { name: "Baseline", days: whatif.baseline.runway_days },
-        { name: "Projected", days: whatif.projected.runway_days },
-      ]
-    : [];
-
-  const scoreGaugeData = score
-    ? [{ value: score.silent_killer_score, fill: scoreColor(score.silent_killer_score) }]
-    : [];
-
-    const handleAsk = async () => {
-  if (!chat.trim()) return;
-  setChatLoading(true);
-  setReply("");
-  
-  const res = await fetch("/api/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message: chat }),
-  });
-  
-  const data = await res.json();
-  setReply(data.reply);
-  setChatLoading(false);
-  setChat("");
-};
-
-  if (loading) {
-    return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#0a0a0a" }}>
-        <div style={{ textAlign: "center", color: "#888" }}>
-          <div style={{ fontSize: 32, marginBottom: 16 }}>⚡</div>
-          <div style={{ fontFamily: "monospace", fontSize: 14 }}>Nerve is scanning your financials...</div>
-        </div>
+  if (loading) return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#05091a" }}>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 48, marginBottom: 16, animation: "spin 2s linear infinite" }}>⚡</div>
+        <div style={{ color: "#60a5fa", fontFamily: "monospace", fontSize: 13, letterSpacing: "3px" }}>SCANNING YOUR FINANCIALS...</div>
+        <div style={{ color: "#1e3a5f", fontSize: 11, marginTop: 8, fontFamily: "monospace" }}>This takes about 3 seconds</div>
       </div>
-    );
-  }
+    </div>
+  );
+
+  const criticalCount = score ? Object.values(score.signals).filter(s => s.status === "CRITICAL").length : 0;
+  const warningCount = score ? Object.values(score.signals).filter(s => s.status === "WARNING").length : 0;
+  const sk = score?.silent_killer_score || 0;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#0a0a0a", color: "#f0f0f0", fontFamily: "'IBM Plex Mono', monospace" }}>
+    <div style={{ minHeight: "100vh", background: "#05091a", color: "#e2e8f0", fontFamily: "ui-monospace, 'SF Mono', Consolas, monospace" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;600;700&family=Syne:wght@700;800&family=DM+Sans:wght@300;400;500;600&display=swap');
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #05091a; }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes pulse { 0%,100%{opacity:1;box-shadow:0 0 8px currentColor;} 50%{opacity:0.5;box-shadow:0 0 2px currentColor;} }
+        @keyframes spin { from{transform:rotate(0deg);} to{transform:rotate(360deg);} }
+        @keyframes shimmer { 0%{background-position:-200px 0} 100%{background-position:calc(200px + 100%) 0} }
+        .fade1{animation:fadeUp 0.5s ease 0.05s both;}
+        .fade2{animation:fadeUp 0.5s ease 0.15s both;}
+        .fade3{animation:fadeUp 0.5s ease 0.25s both;}
+        .fade4{animation:fadeUp 0.5s ease 0.35s both;}
+        .fade5{animation:fadeUp 0.5s ease 0.45s both;}
+        .fade6{animation:fadeUp 0.5s ease 0.55s both;}
+        .hover-card { transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s; }
+        .hover-card:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(96,165,250,0.08); }
+        .exec-btn { transition: all 0.2s; }
+        .exec-btn:hover { background: rgba(96,165,250,0.1) !important; color: #93c5fd !important; }
+        input[type=range] { -webkit-appearance: none; height: 3px; border-radius: 2px; outline: none; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; cursor: pointer; }
+      `}</style>
 
-    {/* HEADER */}
-<div style={{ borderBottom: "1px solid #1a1a1a", padding: "28px 40px", display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
-  <div>
-    <div style={{ display: "flex", alignItems: "baseline", gap: 16 }}>
-      <h1 style={{
-        fontSize: 72, fontWeight: 900, letterSpacing: "-4px", color: "#fff", margin: 0,
-        lineHeight: 1, fontFamily: "'IBM Plex Mono', monospace",
-        textShadow: "0 0 40px rgba(226,75,74,0.3)"
-      }}>
-        NERVE
-      </h1>
-      <div style={{
-        width: 8, height: 8, borderRadius: "50%", background: "#E24B4A",
-        marginBottom: 8, boxShadow: "0 0 12px #E24B4A", animation: "pulse 2s infinite"
-      }} />
+    {/* ── HEADER ── */}
+<div style={{ background: "rgba(5,9,26,0.95)", borderBottom: "1px solid #0d1f3c", padding: "32px 48px", position: "sticky", top: 0, zIndex: 100, backdropFilter: "blur(20px)" }}>
+  
+  {/* Center — NERVE + subheading */}
+  <div style={{ textAlign: "center", marginBottom: 24 }}>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 8 }}>
+      <span style={{ fontSize: 56, fontWeight: 900, color: "#fff", fontFamily: "-apple-system, sans-serif", letterSpacing: "-2px" }}>NERVE</span>
+      <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#60a5fa", animation: "pulse 2s infinite", display: "inline-block" }} />
     </div>
-    <p style={{
-      color: "#333", fontSize: 11, margin: "6px 0 0",
-      letterSpacing: "6px", textTransform: "uppercase",
-      fontFamily: "'IBM Plex Mono', monospace"
-    }}>
-      Autonomous D2C Financial Intelligence Engine
-    </p>
-    <p style={{
-      color: "#E24B4A", fontSize: 10, margin: "4px 0 0",
-      letterSpacing: "3px", opacity: 0.7
-    }}>
-      detects hidden losses before they become disasters
-    </p>
+    <div style={{ fontSize: 13, color: "#94a3b8", letterSpacing: "3px", textTransform: "uppercase", fontFamily: "ui-monospace, Consolas, monospace" }}>
+      Your business is bleeding money in silence. Nerve finds it before it kills you.
+    </div>
   </div>
-  {fivetran && (
-    <div style={{ textAlign: "right", fontSize: 11, color: "#555" }}>
-      <div style={{ color: "#639922", marginBottom: 2 }}>● Fivetran {fivetran.status}</div>
-      <div>Last sync: {fivetran.last_synced}</div>
-      <div>Next: {fivetran.next_sync}</div>
-    </div>
-  )}
-</div>
-      <div style={{ padding: "32px 40px", maxWidth: 1200, margin: "0 auto" }}>
 
-        {/* SILENT KILLER SCORE */}
-        {score && (
-          <div style={{ marginBottom: 40 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 24, alignItems: "center" }}>
-
-              {/* Score Circle */}
-              <div style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 16, padding: 32, textAlign: "center" }}>
-                <div style={{ fontSize: 11, letterSpacing: "2px", color: "#555", marginBottom: 16, textTransform: "uppercase" }}>
-                  Silent Killer Score
-                </div>
-                <div style={{ fontSize: 72, fontWeight: 700, color: scoreColor(score.silent_killer_score), lineHeight: 1 }}>
-                  {score.silent_killer_score}
-                </div>
-                <div style={{ fontSize: 11, color: "#555", marginTop: 4 }}>/100</div>
-                <div style={{
-                  marginTop: 16, display: "inline-block", padding: "4px 16px",
-                  borderRadius: 4, fontSize: 11, fontWeight: 600, letterSpacing: "2px",
-                  background: statusBg(score.risk_level),
-                  color: statusColor(score.risk_level),
-                }}>
-                  {score.risk_level}
-                </div>
-              </div>
-
-              {/* Cross Signal Reason */}
-              <div style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 16, padding: 32 }}>
-                {score.cross_signal_reason ? (
-                  <>
-                    <div style={{ fontSize: 11, letterSpacing: "2px", color: "#555", marginBottom: 16, textTransform: "uppercase" }}>
-                      Cross-Signal Intelligence
-                    </div>
-                    <div style={{ fontSize: 15, lineHeight: 1.7, color: "#E24B4A" }}>
-                      {score.cross_signal_reason}
-                    </div>
-                    {score.cross_signal_bonus > 0 && (
-                      <div style={{ marginTop: 16, fontSize: 11, color: "#555" }}>
-                        +{score.cross_signal_bonus} severity bonus applied
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div style={{ color: "#555", fontSize: 14 }}>No cross-signal patterns detected</div>
-                )}
-
-                {/* Severity bars */}
-                <div style={{ marginTop: 24 }}>
-                  {Object.entries(score.signals).map(([key, sig]) => (
-                    <div key={key} style={{ marginBottom: 10 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#555", marginBottom: 4 }}>
-                        <span>{signalIcons[key]} {signalNames[key]}</span>
-                        <span style={{ color: statusColor(sig.status) }}>{sig.severity}/10</span>
-                      </div>
-                      <div style={{ background: "#1a1a1a", borderRadius: 2, height: 4 }}>
-                        <div style={{
-                          height: 4, borderRadius: 2,
-                          width: `${sig.severity * 10}%`,
-                          background: statusColor(sig.status),
-                          transition: "width 0.5s ease"
-                        }} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
+  {/* Pipeline: Shopify → Stripe → Fivetran → BigQuery → Nerve */}
+  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 0 }}>
+    {[
+      { icon: "", label: "Shopify", sub: "140 orders", color: "#96bf48" },
+      { icon: "", label: "Stripe", sub: "50 payments", color: "#6772e5" },
+      { icon: "", label: "Fivetran", sub: fivetran ? `Synced ${fivetran.last_synced}` : "Syncing...", color: "#60a5fa" },
+      { icon: "", label: "BigQuery", sub: "Live data", color: "#4285f4" },
+      { icon: "", label: "Nerve AI", sub: "Analysing", color: "#f87171" },
+    ].map((node, i) => (
+      <div key={node.label} style={{ display: "flex", alignItems: "center" }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "10px 16px", background: "rgba(255,255,255,0.03)", border: `1px solid ${node.color}25`, borderRadius: 10 }}>
+          <span style={{ fontSize: 18, marginBottom: 4 }}>{node.icon}</span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: node.color }}>{node.label}</span>
+          <span style={{ fontSize: 9, color: "#64748b", marginTop: 2 }}>{node.sub}</span>
+        </div>
+        {i < 4 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 2, padding: "0 6px" }}>
+            <div style={{ width: 20, height: 1, background: "linear-gradient(to right, #1e3a5f, #60a5fa)" }} />
+            <span style={{ color: "#60a5fa", fontSize: 10 }}>▶</span>
           </div>
         )}
+      </div>
+    ))}
+    
+    {/* Fivetran status pill */}
+    {fivetran && (
+      <div style={{ marginLeft: 20, display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.2)", borderRadius: 20 }}>
+        <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#4ade80", display: "inline-block", animation: "pulse 2s infinite" }} />
+        <span style={{ fontSize: 10, color: "#4ade80" }}>Live · Next sync {fivetran.next_sync}</span>
+      </div>
+    )}
+  </div>
+</div>
+      <div style={{ padding: "40px 48px", maxWidth: 1300, margin: "0 auto" }}>
 
-        {/* SIGNAL CARDS */}
-      {/* SIGNAL CARDS */}
+        {/* ── HERO SUMMARY ── */}
+     {/* ── HERO SUMMARY V2 ── */}
 {score && (
-  <div style={{ marginBottom: 40 }}>
-    <div style={{ fontSize: 11, letterSpacing: "2px", color: "#555", marginBottom: 20, textTransform: "uppercase" }}>
-      Signal Detection
-    </div>
+  <div
+    className="fade1"
+    style={{
+      marginBottom: 40,
+      padding: "36px",
+      borderRadius: 28,
+      background:
+        "linear-gradient(135deg, rgba(13,31,60,0.95), rgba(8,15,30,0.95))",
+      border: "1px solid rgba(96,165,250,0.12)",
+      position: "relative",
+      overflow: "hidden",
+    }}
+  >
+    {/* glow */}
+    <div
+      style={{
+        position: "absolute",
+        right: -100,
+        top: -100,
+        width: 280,
+        height: 280,
+        borderRadius: "50%",
+        background: `${scoreColor(sk)}15`,
+        filter: "blur(80px)",
+      }}
+    />
 
-    {/* CRITICAL signals — full width horizontal */}
-    {Object.entries(score.signals)
-      .filter(([, sig]) => sig.status === "CRITICAL")
-      .map(([key, sig]) => (
-        <div key={key} style={{
-          marginBottom: 10,
-          display: "grid",
-          gridTemplateColumns: "180px 1fr auto",
-          alignItems: "center",
-          gap: 0,
-          borderRadius: 8,
-          overflow: "hidden",
-          border: "1px solid #2a0a0a",
-        }}>
-          {/* Left — name block */}
-          <div style={{
-            background: "#E24B4A",
-            padding: "20px 24px",
-            display: "flex", flexDirection: "column", justifyContent: "center",
-          }}>
-            <div style={{ fontSize: 22 }}>{signalIcons[key]}</div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#fff", marginTop: 6, letterSpacing: "-0.5px" }}>
-              {signalNames[key]}
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "1.5fr 0.8fr",
+        gap: 40,
+        alignItems: "center",
+        position: "relative",
+        zIndex: 2,
+      }}
+    >
+      {/* LEFT */}
+      <div>
+        <div
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "8px 14px",
+            borderRadius: 999,
+            background: "rgba(96,165,250,0.08)",
+            border: "1px solid rgba(96,165,250,0.15)",
+            marginBottom: 18,
+          }}
+        >
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              background: "#60a5fa",
+            }}
+          />
+          <span
+            style={{
+              fontSize: 12,
+              color: "#94a3b8",
+              fontWeight: 600,
+            }}
+          >
+            Live Financial Pulse
+          </span>
+        </div>
+
+        <h1
+          style={{
+            fontSize: 48,
+            fontWeight: 800,
+            color: "#fff",
+            lineHeight: 1.05,
+            marginBottom: 16,
+            letterSpacing: "-1.5px",
+          }}
+        >
+          {criticalCount > 0
+            ? `${criticalCount} issue${
+                criticalCount > 1 ? "s" : ""
+              } silently hurting your business.`
+            : warningCount > 0
+            ? "A few financial signals need attention."
+            : "Everything looks healthy today."}
+        </h1>
+
+        <p
+          style={{
+            color: "#94a3b8",
+            maxWidth: 650,
+            fontSize: 16,
+            lineHeight: 1.7,
+          }}
+        >
+          {criticalCount > 0
+            ? `Nerve detected ${criticalCount} critical pattern${
+                criticalCount > 1 ? "s" : ""
+              } hidden inside your financial data. Here's exactly what requires attention right now.`
+            : "No major threats detected. Nerve continuously monitors your business and alerts you before small problems become expensive ones."}
+        </p>
+
+        {/* quick pills */}
+        <div
+          style={{
+            display: "flex",
+            gap: 12,
+            flexWrap: "wrap",
+            marginTop: 24,
+          }}
+        >
+          <div
+            style={{
+              padding: "10px 14px",
+              borderRadius: 12,
+              background: "rgba(248,113,113,0.08)",
+              border: "1px solid rgba(248,113,113,0.12)",
+            }}
+          >
+            <div style={{ fontSize: 11, color: "#64748b" }}>
+              Critical Issues
             </div>
-            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", letterSpacing: "2px", marginTop: 2 }}>
-              CRITICAL
+            <div
+              style={{
+                color: "#f87171",
+                fontSize: 20,
+                fontWeight: 700,
+              }}
+            >
+              {criticalCount}
             </div>
           </div>
 
-          {/* Middle — alert */}
-          <div style={{ background: "#0f0505", padding: "20px 28px" }}>
-            <div style={{ fontSize: 12, color: "#ccc", lineHeight: 1.7, marginBottom: 8 }}>
-              {sig.alert}
+          <div
+            style={{
+              padding: "10px 14px",
+              borderRadius: 12,
+              background: "rgba(251,191,36,0.08)",
+              border: "1px solid rgba(251,191,36,0.12)",
+            }}
+          >
+            <div style={{ fontSize: 11, color: "#64748b" }}>
+              Warnings
             </div>
-            {key === "zombie_sku" && sig.zombies?.map((z: any) => (
-              <span key={z.sku_id} style={{
-                display: "inline-block", marginRight: 8, marginTop: 4,
-                padding: "3px 10px", borderRadius: 2,
-                background: "#1a0a0a", border: "1px solid #2a1010",
-                fontSize: 10, color: "#E24B4A"
-              }}>
-                {z.product_name} · {z.days_since_sold}d · ₹{z.locked_capital.toLocaleString()}
-              </span>
-            ))}
-            {key === "phantom_liability" && sig.platforms?.map((p: any) => (
-              <span key={p.platform} style={{
-                display: "inline-block", marginRight: 8, marginTop: 4,
-                padding: "3px 10px", borderRadius: 2,
-                background: "#1a0a0a", border: "1px solid #2a1010",
-                fontSize: 10, color: "#E24B4A"
-              }}>
-                {p.platform} · ₹{Math.round(p.unbilled_amount).toLocaleString()} · {p.earliest_charge}
-              </span>
-            ))}
+            <div
+              style={{
+                color: "#fbbf24",
+                fontSize: 20,
+                fontWeight: 700,
+              }}
+            >
+              {warningCount}
+            </div>
           </div>
 
-          {/* Right — severity */}
-          <div style={{
-            background: "#0f0505", padding: "20px 24px",
-            textAlign: "center", borderLeft: "1px solid #1a0808"
-          }}>
-            <div style={{ fontSize: 32, fontWeight: 900, color: "#E24B4A", lineHeight: 1 }}>
-              {sig.severity}
+          <div
+            style={{
+              padding: "10px 14px",
+              borderRadius: 12,
+              background: "rgba(96,165,250,0.08)",
+              border: "1px solid rgba(96,165,250,0.12)",
+            }}
+          >
+            <div style={{ fontSize: 11, color: "#64748b" }}>
+              Cash Runway
             </div>
-            <div style={{ fontSize: 9, color: "#555", letterSpacing: "1px", marginTop: 2 }}>/10</div>
+            <div
+              style={{
+                color: "#60a5fa",
+                fontSize: 20,
+                fontWeight: 700,
+              }}
+            >
+              {score.signals.cash_cliff?.runway_days || "--"}d
+            </div>
           </div>
         </div>
-      ))}
+      </div>
 
-    {/* WARNING + HEALTHY — compact horizontal list */}
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
-      {Object.entries(score.signals)
-        .filter(([, sig]) => sig.status !== "CRITICAL")
-        .map(([key, sig]) => (
-          <div key={key} style={{
-            display: "flex", alignItems: "center", gap: 16,
-            padding: "14px 20px",
-            background: "#0d0d0d",
-            border: `1px solid ${sig.status === "WARNING" ? "#2a2010" : "#0d1a0d"}`,
-            borderRadius: 8,
-            borderLeft: `3px solid ${statusColor(sig.status)}`,
-          }}>
-            <span style={{ fontSize: 20 }}>{signalIcons[key]}</span>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "#aaa" }}>{signalNames[key]}</div>
-              <div style={{ fontSize: 10, color: "#555", marginTop: 2 }}>{sig.alert}</div>
-            </div>
-            <div style={{
-              fontSize: 20, fontWeight: 900,
-              color: statusColor(sig.status), minWidth: 28, textAlign: "right"
-            }}>
-              {sig.severity}
-            </div>
-          </div>
-        ))}
+      {/* RIGHT */}
+      <div
+        style={{
+          background: "rgba(255,255,255,0.03)",
+          border: `1px solid ${scoreColor(sk)}20`,
+          borderRadius: 24,
+          padding: 28,
+          textAlign: "center",
+          backdropFilter: "blur(20px)",
+        }}
+      >
+        <div
+          style={{
+            fontSize: 12,
+            color: "#64748b",
+            marginBottom: 12,
+            letterSpacing: "2px",
+          }}
+        >
+          RISK SCORE
+        </div>
+
+        <div
+          style={{
+            fontSize: 92,
+            fontWeight: 800,
+            color: scoreColor(sk),
+            lineHeight: 1,
+            letterSpacing: "-4px",
+          }}
+        >
+          {sk}
+        </div>
+
+        <div
+          style={{
+            color: "#64748b",
+            marginTop: 6,
+            fontSize: 13,
+          }}
+        >
+          out of 100
+        </div>
+
+        <div
+          style={{
+            marginTop: 20,
+            padding: "8px 18px",
+            borderRadius: 999,
+            display: "inline-block",
+            background: `${scoreColor(sk)}15`,
+            border: `1px solid ${scoreColor(sk)}30`,
+            color: scoreColor(sk),
+            fontWeight: 700,
+            fontSize: 12,
+          }}
+        >
+          {score.risk_level}
+        </div>
+
+        <div
+          style={{
+            marginTop: 24,
+            fontSize: 12,
+            color: "#64748b",
+          }}
+        >
+          Lower score = healthier business
+        </div>
+      </div>
     </div>
   </div>
 )}
-        
 
-        {/* WHAT-IF SIMULATOR */}
-        <div style={{ marginBottom: 40, background: "#111", border: "1px solid #1e1e1e", borderRadius: 16, padding: 32 }}>
-          <div style={{ fontSize: 11, letterSpacing: "2px", color: "#555", marginBottom: 24, textTransform: "uppercase" }}>
-            What-If Simulator
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 32 }}>
-            {/* Controls */}
-            <div>
-              <div style={{ marginBottom: 24 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#888", marginBottom: 8 }}>
-                  <span>Ad Spend Change</span>
-                  <span style={{ color: adSpend < 0 ? "#639922" : adSpend > 0 ? "#E24B4A" : "#888" }}>
-                    {adSpend > 0 ? "+" : ""}{adSpend}%
-                  </span>
-                </div>
-                <input type="range" min={-50} max={50} value={adSpend} step={5}
-                  onChange={(e) => setAdSpend(Number(e.target.value))}
-                  style={{ width: "100%", accentColor: "#E24B4A" }}
-                />
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#444", marginTop: 4 }}>
-                  <span>-50%</span><span>0</span><span>+50%</span>
-                </div>
-              </div>
-
-              <div style={{ marginBottom: 24 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#888", marginBottom: 8 }}>
-                  <span>Delay Payment</span>
-                  <span style={{ color: "#EF9F27" }}>{delayPayment} days</span>
-                </div>
-                <input type="range" min={0} max={30} value={delayPayment} step={5}
-                  onChange={(e) => setDelayPayment(Number(e.target.value))}
-                  style={{ width: "100%", accentColor: "#EF9F27" }}
-                />
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#444", marginTop: 4 }}>
-                  <span>0</span><span>15d</span><span>30d</span>
-                </div>
-              </div>
-
-              <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", background: "#1a1a1a", borderRadius: 8, cursor: "pointer" }}
-                onClick={() => setPauseZombie(!pauseZombie)}>
-                <div style={{
-                  width: 20, height: 20, borderRadius: 4,
-                  border: `2px solid ${pauseZombie ? "#639922" : "#333"}`,
-                  background: pauseZombie ? "#639922" : "transparent",
-                  display: "flex", alignItems: "center", justifyContent: "center"
-                }}>
-                  {pauseZombie && <span style={{ fontSize: 12, color: "#fff" }}>✓</span>}
-                </div>
-                <span style={{ fontSize: 12, color: "#888" }}>🧟 Pause Zombie SKU Ads</span>
-              </div>
-            </div>
-
-            {/* Results */}
-            {whatif && (
-              <div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
-                  {[
-                    { label: "Runway", base: `${whatif.baseline.runway_days}d`, proj: `${whatif.projected.runway_days}d`, change: whatif.improvement.runway_change },
-                    { label: "True Cash", base: `₹${Math.round(whatif.baseline.true_cash).toLocaleString()}`, proj: `₹${Math.round(whatif.projected.true_cash).toLocaleString()}`, change: whatif.projected.true_cash - whatif.baseline.true_cash },
-                    { label: "Kill Score", base: `${whatif.baseline.silent_killer_score}`, proj: `${whatif.projected.silent_killer_score}`, change: -whatif.improvement.score_change },
-                    { label: "Cash Freed", base: "₹0", proj: `₹${Math.round(whatif.projected.freed_capital).toLocaleString()}`, change: whatif.projected.freed_capital },
-                  ].map((item) => (
-                    <div key={item.label} style={{ background: "#1a1a1a", borderRadius: 8, padding: 12 }}>
-                      <div style={{ fontSize: 10, color: "#555", marginBottom: 4, letterSpacing: "1px" }}>{item.label}</div>
-                      <div style={{ fontSize: 11, color: "#555", marginBottom: 2 }}>{item.base} →</div>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: item.change > 0 ? "#639922" : item.change < 0 ? "#E24B4A" : "#888" }}>
-                        {item.proj}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Mini chart */}
-                <ResponsiveContainer width="100%" height={120}>
-                  <AreaChart data={[
-                    { name: "Now", score: whatif.baseline.silent_killer_score },
-                    { name: "Projected", score: whatif.projected.silent_killer_score },
-                  ]}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" />
-                    <XAxis dataKey="name" tick={{ fill: "#555", fontSize: 10 }} />
-                    <YAxis domain={[0, 100]} tick={{ fill: "#555", fontSize: 10 }} />
-                    <Tooltip contentStyle={{ background: "#111", border: "1px solid #333", borderRadius: 4, fontSize: 11 }} />
-                    <Area type="monotone" dataKey="score" stroke="#E24B4A" fill="#3a1a1a" strokeWidth={2} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </div>
+    {/* ── SIGNAL FEED V2 ── */}
+{score && (
+  <div className="fade2" style={{ marginBottom: 40 }}>
+    
+    {/* Header */}
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: 28,
+      }}
+    >
+      <div>
+        <div
+          style={{
+            fontSize: 12,
+            color: "#60a5fa",
+            fontWeight: 700,
+            letterSpacing: "2px",
+            marginBottom: 6,
+          }}
+        >
+          LIVE SIGNALS
         </div>
 
-        {/* GUARDRAIL ACTIONS */}
-        <div style={{ marginBottom: 40 }}>
-          <div style={{ fontSize: 11, letterSpacing: "2px", color: "#555", marginBottom: 16, textTransform: "uppercase" }}>
-            Guardrail Actions — Execute via Nerve
+        <div
+          style={{
+            fontSize: 28,
+            fontWeight: 800,
+            color: "#fff",
+          }}
+        >
+          Financial Intelligence Feed
+        </div>
+      </div>
+
+      <div
+        style={{
+          padding: "8px 14px",
+          borderRadius: 999,
+          background: "rgba(96,165,250,0.08)",
+          border: "1px solid rgba(96,165,250,0.15)",
+          color: "#60a5fa",
+          fontSize: 12,
+          fontWeight: 600,
+        }}
+      >
+        {Object.keys(score.signals).length} Signals Active
+      </div>
+    </div>
+
+    {/* Cards */}
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 14,
+      }}
+    >
+      {Object.entries(score.signals).map(([key, sig]) => {
+        const meta = SIGNAL_META[key];
+
+        return (
+          <div
+            key={key}
+            className="hover-card"
+            style={{
+              borderRadius: 20,
+              padding: 24,
+              background:
+                "linear-gradient(135deg, rgba(13,31,60,0.95), rgba(8,15,30,0.95))",
+              border: "1px solid rgba(96,165,250,0.12)",
+              boxShadow:
+                "0 10px 40px rgba(59,130,246,0.08)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+              }}
+            >
+              {/* Left */}
+              <div
+                style={{
+                  display: "flex",
+                  gap: 18,
+                  flex: 1,
+                }}
+              >
+                <div
+                  style={{
+                    width: 56,
+                    height: 56,
+                    borderRadius: 14,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background:
+                      "rgba(96,165,250,0.08)",
+                    border:
+                      "1px solid rgba(96,165,250,0.15)",
+                    fontSize: 24,
+                  }}
+                >
+                  {meta.icon}
+                </div>
+
+                <div>
+                  <div
+                    style={{
+                      color: "#60a5fa",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      letterSpacing: "1px",
+                      marginBottom: 8,
+                    }}
+                  >
+                    {meta.name}
+                  </div>
+
+                  <div
+                    style={{
+                      color: "#fff",
+                      fontSize: 18,
+                      fontWeight: 700,
+                      marginBottom: 10,
+                    }}
+                  >
+                    {meta.headline(sig)}
+                  </div>
+
+                  <div
+                    style={{
+                      color: "#94a3b8",
+                      fontSize: 13,
+                      lineHeight: 1.7,
+                      maxWidth: 700,
+                    }}
+                  >
+                    {meta.subline(sig)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Right */}
+              <div
+                style={{
+                  textAlign: "center",
+                  minWidth: 100,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 42,
+                    fontWeight: 800,
+                    color: "#60a5fa",
+                    textShadow:
+                      "0 0 30px rgba(96,165,250,0.35)",
+                  }}
+                >
+                  {sig.severity}
+                </div>
+
+                <div
+                  style={{
+                    color: "#64748b",
+                    fontSize: 11,
+                  }}
+                >
+                  Severity
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: "6px 10px",
+                    borderRadius: 999,
+                    background:
+                      "rgba(96,165,250,0.08)",
+                    border:
+                      "1px solid rgba(96,165,250,0.15)",
+                    color: "#60a5fa",
+                    fontSize: 11,
+                    fontWeight: 600,
+                  }}
+                >
+                  {sig.status}
+                </div>
+              </div>
+            </div>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
+        );
+      })}
+    </div>
+  </div>
+)}
+       {/* ── AI CORRELATION INSIGHT ── */}
+{score?.cross_signal_reason && (
+  <div
+    className="fade3"
+    style={{
+      marginBottom: 40,
+      padding: "28px 32px",
+      borderRadius: 24,
+      background:
+        "linear-gradient(135deg, rgba(13,31,60,0.95), rgba(8,15,30,0.95))",
+      border: "1px solid rgba(96,165,250,0.12)",
+      position: "relative",
+      overflow: "hidden",
+      boxShadow: "0 10px 40px rgba(59,130,246,0.08)",
+    }}
+  >
+    {/* Glow */}
+    <div
+      style={{
+        position: "absolute",
+        top: -80,
+        right: -80,
+        width: 220,
+        height: 220,
+        borderRadius: "50%",
+        background: "rgba(96,165,250,0.08)",
+        filter: "blur(70px)",
+      }}
+    />
+
+    <div
+      style={{
+        display: "flex",
+        gap: 20,
+        alignItems: "flex-start",
+        position: "relative",
+        zIndex: 2,
+      }}
+    >
+      {/* Icon */}
+      <div
+        style={{
+          width: 64,
+          height: 64,
+          borderRadius: 18,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "rgba(96,165,250,0.08)",
+          border: "1px solid rgba(96,165,250,0.15)",
+          flexShrink: 0,
+          fontSize: 28,
+        }}
+      >
+        
+      </div>
+
+      {/* Content */}
+      <div style={{ flex: 1 }}>
+        <div
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "6px 12px",
+            borderRadius: 999,
+            background: "rgba(96,165,250,0.08)",
+            border: "1px solid rgba(96,165,250,0.15)",
+            marginBottom: 14,
+          }}
+        >
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: "#60a5fa",
+            }}
+          />
+
+          <span
+            style={{
+              color: "#60a5fa",
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: "1px",
+            }}
+          >
+            AI CORRELATION DETECTED
+          </span>
+        </div>
+
+        <div
+          style={{
+            fontSize: 24,
+            fontWeight: 800,
+            color: "#fff",
+            marginBottom: 10,
+            lineHeight: 1.3,
+          }}
+        >
+          {score.cross_signal_reason}
+        </div>
+
+        <div
+          style={{
+            fontSize: 14,
+            color: "#94a3b8",
+            lineHeight: 1.8,
+            maxWidth: 850,
+          }}
+        >
+          Nerve discovered a relationship between multiple financial signals.
+          These patterns often appear together before cash flow pressure,
+          inventory problems, or profitability issues become visible.
+        </div>
+      </div>
+
+      {/* Risk Score */}
+      <div
+        style={{
+          textAlign: "center",
+          minWidth: 120,
+        }}
+      >
+        <div
+          style={{
+            fontSize: 42,
+            fontWeight: 800,
+            color: "#60a5fa",
+            textShadow: "0 0 30px rgba(96,165,250,0.35)",
+          }}
+        >
+          +{score.cross_signal_bonus}
+        </div>
+
+        <div
+          style={{
+            fontSize: 11,
+            color: "#64748b",
+          }}
+        >
+          Risk Points
+        </div>
+      </div>
+    </div>
+  </div>
+)}
+
+        {/* ── ACTIONS ── */}
+        <div className="fade3" style={{ marginBottom: 36 }}>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 11, color: "#334155", letterSpacing: "4px", textTransform: "uppercase", fontFamily: "ui-monospace, 'SF Mono', Consolas, monospace", marginBottom: 4 }}>Your Move</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: "#fff", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>Stop the bleeding. Here's exactly what to do.</div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
             {[
-              { id: "pause_zombie_ads", label: "⏸Pause Zombie Ads", desc: "Stop bleeding ad spend on dead SKUs", severity: "CRITICAL" },
-              { id: "flash_discount", label: " Apply 40% Flash Sale", desc: "Liquidate dead stock to free capital", severity: "CRITICAL" },
-              { id: "send_receivable_reminder", label: "Send Payment Reminder", desc: "Chase pending receivables today", severity: "WARNING" },
-              { id: "reduce_ad_budget", label: " Reduce Ad Budget 30%", desc: "Reduce phantom liability exposure", severity: "WARNING" },
+              { id: "pause_zombie_ads", icon: "⏸", label: "Kill the Zombie Ads", tagline: "Stop paying to promote products nobody buys.", desc: "You're wasting ad budget on dead SKUs. One click stops the bleed.", severity: "CRITICAL", color: "#f87171" },
+              { id: "flash_discount", icon: "", label: "Flash Sale: Free the Cash", tagline: "Turn dead stock into working capital today.", desc: "40% off flash sale on slow movers. Get your money back out of the shelf.", severity: "CRITICAL", color: "#fb923c" },
+              { id: "send_receivable_reminder", icon: "📨", label: "Chase That Money", tagline: "Someone owes you — go collect.", desc: "Send automated payment reminders. Get paid faster without the awkward call.", severity: "WARNING", color: "#fbbf24" },
+              { id: "reduce_ad_budget", icon: "", label: "Trim the Fat", tagline: "Your hidden ad bills are eating you alive.", desc: "Reduce Meta/Google budget 30% to stop phantom liability from piling up.", severity: "WARNING", color: "#a78bfa" },
             ].map((action) => {
               const done = executed[action.id];
               return (
-                <div key={action.id} style={{
-                  background: "#111", border: `1px solid ${done ? "#1a2a1a" : "#1e1e1e"}`,
-                  borderRadius: 12, padding: 20,
-                }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "#ccc", marginBottom: 6 }}>{action.label}</div>
-                  <div style={{ fontSize: 11, color: "#555", marginBottom: 16, lineHeight: 1.5 }}>{action.desc}</div>
+                <div key={action.id} className="hover-card" style={{ borderRadius: 14, border: `1px solid ${done ? "rgba(74,222,128,0.2)" : "#0d1f3c"}`, background: "#080f1e", padding: "22px 20px", display: "flex", flexDirection: "column" }}>
+                  <div style={{ fontSize: 26, marginBottom: 12 }}>{action.icon}</div>
+                  <div style={{ fontSize: 11, color: action.color, marginBottom: 6, fontFamily: "ui-monospace, 'SF Mono', Consolas, monospace", letterSpacing: "1px" }}>{action.tagline}</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", marginBottom: 8, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", lineHeight: 1.3 }}>{action.label}</div>
+                  <div style={{ fontSize: 11, color: "#334155", lineHeight: 1.6, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", marginBottom: 16, flex: 1 }}>{action.desc}</div>
                   {done ? (
                     <div>
-                      <div style={{ fontSize: 11, color: "#639922", marginBottom: 4 }}>{done.message}</div>
-                      <div style={{ fontSize: 10, color: "#555" }}>{done.impact}</div>
+                      <div style={{ fontSize: 12, color: "#4ade80", marginBottom: 4 }}>Done! {done.message}</div>
+                      <div style={{ fontSize: 10, color: "#334155" }}>{done.impact}</div>
                     </div>
                   ) : (
-                    <button
-                      onClick={() => executeAction(action.id)}
-                      disabled={executing === action.id}
-                      style={{
-                        width: "100%", padding: "8px 16px", borderRadius: 6,
-                        border: `1px solid ${action.severity === "CRITICAL" ? "#3a1a1a" : "#2a2010"}`,
-                        background: "transparent", cursor: "pointer", fontSize: 11,
-                        color: action.severity === "CRITICAL" ? "#E24B4A" : "#EF9F27",
-                        fontFamily: "inherit"
-                      }}
-                    >
-                      {executing === action.id ? "Executing..." : "Execute via Nerve →"}
+                    <button className="exec-btn" onClick={() => executeAction(action.id)} disabled={executing === action.id} style={{ width: "100%", padding: "9px 14px", borderRadius: 8, border: "1px solid #1e3a5f", background: "transparent", cursor: "pointer", fontSize: 11, color: "#60a5fa", fontFamily: "inherit" }}>
+                      {executing === action.id ? "Working..." : "Execute via Nerve →"}
                     </button>
                   )}
                 </div>
@@ -512,100 +827,143 @@ export default function NerveDashboard() {
           </div>
         </div>
 
-        {/* FINANCIAL CHARTS */}
-        {score && (
-          <div style={{ marginBottom: 40 }}>
-            <div style={{ fontSize: 11, letterSpacing: "2px", color: "#555", marginBottom: 16, textTransform: "uppercase" }}>
-              Financial Overview
+        {/* ── WHAT IF ── */}
+        <div className="fade4" style={{ marginBottom: 36, background: "#080f1e", border: "1px solid #0d1f3c", borderRadius: 16, padding: "32px 32px" }}>
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ fontSize: 11, color: "#334155", letterSpacing: "4px", textTransform: "uppercase", fontFamily: "ui-monospace, 'SF Mono', Consolas, monospace", marginBottom: 4 }}>What-If Simulator</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: "#fff", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>Play it safe. Test decisions before you make them.</div>
+            <div style={{ fontSize: 12, color: "#334155", marginTop: 6, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>Move the sliders and watch how your business metrics change — in real time.</div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 40 }}>
+            <div>
+              {[
+                { label: "What if I change my ad spend by", value: adSpend, min: -50, max: 50, step: 5, unit: "%", color: "#60a5fa", onChange: setAdSpend, left: "Cut 50%", right: "Increase 50%", desc: adSpend < 0 ? "Good move — freeing up cash" : adSpend > 0 ? "More spend = more phantom debt risk" : "No change" },
+                { label: "What if I delay supplier payment by", value: delayPayment, min: 0, max: 30, step: 5, unit: " days", color: "#fbbf24", onChange: setDelayPayment, left: "Pay now", right: "Delay 30d", desc: delayPayment > 0 ? "Buys time but damages supplier trust" : "Paying on time" },
+              ].map((sl) => (
+                <div key={sl.label} style={{ marginBottom: 28 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#94a3b8", marginBottom: 10, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
+                    <span>{sl.label}</span>
+                    <span style={{ color: sl.color, fontWeight: 700, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>{sl.value > 0 ? "+" : ""}{sl.value}{sl.unit}</span>
+                  </div>
+                  <input type="range" min={sl.min} max={sl.max} value={sl.value} step={sl.step}
+                    onChange={(e) => sl.onChange(Number(e.target.value))}
+                    style={{ width: "100%", accentColor: sl.color, background: `linear-gradient(to right, ${sl.color} ${((sl.value - sl.min) / (sl.max - sl.min)) * 100}%, #0d1f3c ${((sl.value - sl.min) / (sl.max - sl.min)) * 100}%)` }}
+                  />
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#1e3a5f", marginTop: 4 }}>
+                    <span>{sl.left}</span><span>{sl.right}</span>
+                  </div>
+                  <div style={{ fontSize: 10, color: "#334155", marginTop: 6, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>{sl.desc}</div>
+                </div>
+              ))}
+              <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", background: "#0a1322", borderRadius: 10, cursor: "pointer", border: `1px solid ${pauseZombie ? "rgba(74,222,128,0.2)" : "#0d1f3c"}` }} onClick={() => setPauseZombie(!pauseZombie)}>
+                <div style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${pauseZombie ? "#4ade80" : "#1e3a5f"}`, background: pauseZombie ? "#4ade80" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  {pauseZombie && <span style={{ fontSize: 10, color: "#000" }}>✓</span>}
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: "#94a3b8", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>Stop all ads on dead products</div>
+                  <div style={{ fontSize: 10, color: "#334155" }}>See how much cash this frees up instantly</div>
+                </div>
+              </div>
             </div>
+
+            {whatif && (
+              <div>
+                <div style={{ fontSize: 11, color: "#334155", marginBottom: 14, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>Here's what your business would look like:</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
+                  {[
+                    { icon: "", label: "Days of Cash Left", base: `${whatif.baseline.runway_days}d`, proj: `${whatif.projected.runway_days}d`, change: whatif.improvement.runway_change, wantPositive: true },
+                    { icon: "", label: "Real Cash Available", base: `Rs.${Math.round(whatif.baseline.true_cash).toLocaleString()}`, proj: `Rs.${Math.round(whatif.projected.true_cash).toLocaleString()}`, change: whatif.projected.true_cash - whatif.baseline.true_cash, wantPositive: true },
+                    { icon: "", label: "Risk Score", base: `${whatif.baseline.silent_killer_score}`, proj: `${whatif.projected.silent_killer_score}`, change: -(whatif.improvement.score_change), wantPositive: false },
+                    { icon: "", label: "Cash Unlocked", base: "Rs.0", proj: `Rs.${Math.round(whatif.projected.freed_capital).toLocaleString()}`, change: whatif.projected.freed_capital, wantPositive: true },
+                  ].map((item) => {
+                    const improved = item.wantPositive ? item.change > 0 : item.change < 0;
+                    const worsened = item.wantPositive ? item.change < 0 : item.change > 0;
+                    return (
+                      <div key={item.label} style={{ background: "#0a1322", borderRadius: 10, padding: "14px 16px", border: "1px solid #0d1f3c" }}>
+                        <div style={{ fontSize: 18, marginBottom: 6 }}>{item.icon}</div>
+                        <div style={{ fontSize: 10, color: "#334155", marginBottom: 4, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>{item.label}</div>
+                        <div style={{ fontSize: 10, color: "#1e3a5f", marginBottom: 2 }}>{item.base} →</div>
+                        <div style={{ fontSize: 18, fontWeight: 800, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: improved ? "#4ade80" : worsened ? "#f87171" : "#60a5fa" }}>{item.proj}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <ResponsiveContainer width="100%" height={100}>
+                  <AreaChart data={[{ name: "Now", score: whatif.baseline.silent_killer_score }, { name: "After", score: whatif.projected.silent_killer_score }]}>
+                    <XAxis dataKey="name" tick={{ fill: "#334155", fontSize: 10 }} axisLine={false} tickLine={false} />
+                    <YAxis domain={[0, 100]} tick={{ fill: "#334155", fontSize: 10 }} axisLine={false} tickLine={false} />
+                    <Tooltip contentStyle={{ background: "#080f1e", border: "1px solid #1e3a5f", borderRadius: 8, fontSize: 11 }} />
+                    <Area type="monotone" dataKey="score" stroke="#60a5fa" fill="rgba(96,165,250,0.06)" strokeWidth={2} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── CHARTS ── */}
+        {score && (
+          <div className="fade5" style={{ marginBottom: 36 }}>
+            <div style={{ fontSize: 11, color: "#334155", letterSpacing: "4px", textTransform: "uppercase", fontFamily: "ui-monospace, 'SF Mono', Consolas, monospace", marginBottom: 20 }}>Financial Overview</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-
-              {/* Cash vs Phantom */}
-              <div style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 12, padding: 20 }}>
-                <div style={{ fontSize: 11, color: "#555", marginBottom: 16 }}>Cash Position Reality</div>
-                <ResponsiveContainer width="100%" height={180}>
-                  <AreaChart data={[
-                    { name: "Bank Balance", amount: score.signals.cash_cliff?.bank_balance || 0 },
-                    { name: "True Cash", amount: score.signals.phantom_liability?.true_cash || 0 },
-                    { name: "After Bills", amount: score.signals.cash_cliff?.net_position || 0 },
-                  ]}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" />
-                    <XAxis dataKey="name" tick={{ fill: "#555", fontSize: 10 }} />
-                    <YAxis tick={{ fill: "#555", fontSize: 10 }} tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`} />
-                    <Tooltip
-                      contentStyle={{ background: "#111", border: "1px solid #333", borderRadius: 4, fontSize: 11 }}
-                      formatter={(v: any) => [`₹${Math.round(v).toLocaleString()}`, ""]}
-                    />
-                    <Area type="monotone" dataKey="amount" stroke="#E24B4A" fill="#1a0a0a" strokeWidth={2} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Locked Capital */}
-              <div style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 12, padding: 20 }}>
-                <div style={{ fontSize: 11, color: "#555", marginBottom: 16 }}>Capital Breakdown</div>
-                <ResponsiveContainer width="100%" height={180}>
-                  <AreaChart data={[
-                    { name: "Liquid Cash", amount: score.signals.phantom_liability?.true_cash || 0 },
-                    { name: "Dead Stock", amount: score.signals.zombie_sku?.total_locked_capital || 0 },
-                    { name: "Unbilled Ads", amount: score.signals.phantom_liability?.total_unbilled || 0 },
-                    { name: "Upcoming Bills", amount: score.signals.inventory_collision?.upcoming_bills || 0 },
-                  ]}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" />
-                    <XAxis dataKey="name" tick={{ fill: "#555", fontSize: 9 }} />
-                    <YAxis tick={{ fill: "#555", fontSize: 10 }} tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`} />
-                    <Tooltip
-                      contentStyle={{ background: "#111", border: "1px solid #333", borderRadius: 4, fontSize: 11 }}
-                      formatter={(v: any) => [`₹${Math.round(v).toLocaleString()}`, ""]}
-                    />
-                    <Area type="monotone" dataKey="amount" stroke="#EF9F27" fill="#1a1200" strokeWidth={2} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
+              {[
+                {
+                  title: "Your bank says one thing. Reality says another.",
+                  sub: "The gap between your bank balance and what's actually spendable after hidden costs.",
+                  color: "#60a5fa",
+                  fill: "rgba(96,165,250,0.06)",
+                  data: [{ name: "Bank Balance", amount: score.signals.cash_cliff?.bank_balance || 0 }, { name: "Real Cash", amount: score.signals.phantom_liability?.true_cash || 0 }, { name: "After Bills", amount: score.signals.cash_cliff?.net_position || 0 }]
+                },
+                {
+                  title: "Where your money is actually stuck.",
+                  sub: "Unsold stock, pending ad bills, and upcoming payments — all locking up your cash flow.",
+                  color: "#fbbf24",
+                  fill: "rgba(251,191,36,0.05)",
+                  data: [{ name: "Free Cash", amount: score.signals.phantom_liability?.true_cash || 0 }, { name: "Dead Stock", amount: score.signals.zombie_sku?.total_locked_capital || 0 }, { name: "Ad Bills", amount: score.signals.phantom_liability?.total_unbilled || 0 }, { name: "Due Bills", amount: score.signals.inventory_collision?.upcoming_bills || 0 }]
+                }
+              ].map((chart) => (
+                <div key={chart.title} className="hover-card" style={{ background: "#080f1e", border: "1px solid #0d1f3c", borderRadius: 14, padding: "22px 22px" }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#cbd5e1", marginBottom: 4, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", lineHeight: 1.3 }}>{chart.title}</div>
+                  <div style={{ fontSize: 10, color: "#334155", marginBottom: 16, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>{chart.sub}</div>
+                  <ResponsiveContainer width="100%" height={150}>
+                    <AreaChart data={chart.data}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#0d1f3c" />
+                      <XAxis dataKey="name" tick={{ fill: "#334155", fontSize: 9 }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fill: "#334155", fontSize: 9 }} tickFormatter={(v) => `Rs.${(v / 1000).toFixed(0)}k`} axisLine={false} tickLine={false} />
+                      <Tooltip contentStyle={{ background: "#080f1e", border: "1px solid #1e3a5f", borderRadius: 8, fontSize: 11 }} formatter={(v: any) => [`Rs.${Math.round(v).toLocaleString()}`, ""]} />
+                      <Area type="monotone" dataKey="amount" stroke={chart.color} fill={chart.fill} strokeWidth={2} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              ))}
             </div>
           </div>
         )}
 
-        {/* CHAT */}
-        <div style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 16, padding: 24 }}>
-          <div style={{ fontSize: 11, letterSpacing: "2px", color: "#555", marginBottom: 16, textTransform: "uppercase" }}>
-            Chat with Nerve
+        {/* ── CHAT ── */}
+        <div className="fade6" style={{ background: "#080f1e", border: "1px solid #0d1f3c", borderRadius: 16, padding: "28px 28px" }}>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 11, color: "#334155", letterSpacing: "4px", textTransform: "uppercase", fontFamily: "ui-monospace, 'SF Mono', Consolas, monospace", marginBottom: 4 }}>Ask Nerve</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: "#fff", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>Got a question about your finances? Just ask.</div>
+            <div style={{ fontSize: 12, color: "#334155", marginTop: 6, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>No finance degree needed. Ask in plain English and Nerve will explain what's happening and what to do.</div>
           </div>
           <div style={{ display: "flex", gap: 12 }}>
-            <input
-              value={chat}
-              onChange={(e) => setChat(e.target.value)}
-              placeholder="Why is my margin dropping? What should I do first?"
-              style={{
-                flex: 1, background: "#1a1a1a", border: "1px solid #2a2a2a",
-                borderRadius: 8, padding: "10px 16px", color: "#ccc",
-                fontSize: 12, fontFamily: "inherit", outline: "none"
-              }}
+            <input value={chat} onChange={(e) => setChat(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAsk()}
+              placeholder="Why is my profit dropping? Should I run a sale? How do I fix my cash flow?"
+              style={{ flex: 1, background: "#0a1322", border: "1px solid #1e3a5f", borderRadius: 10, padding: "13px 18px", color: "#e2e8f0", fontSize: 12, fontFamily: "inherit", outline: "none" }}
             />
-          <button
-  onClick={handleAsk}
-  disabled={chatLoading}
-  style={{
-    padding: "10px 20px", background: "#E24B4A", border: "none",
-    borderRadius: 8, color: "#fff", fontSize: 12, cursor: "pointer",
-    fontFamily: "inherit", opacity: chatLoading ? 0.6 : 1
-  }}
->
-  {chatLoading ? "..." : "Ask →"}
-</button>
-
-{reply && (
-  <div style={{
-    marginTop: 16, padding: 16, background: "#1a1a1a",
-    border: "1px solid #2a2a2a", borderRadius: 8,
-    fontSize: 12, color: "#ccc", lineHeight: 1.6
-  }}>
-    {reply}
-  </div>
-)}
+            <button onClick={handleAsk} disabled={chatLoading} style={{ padding: "13px 28px", background: chatLoading ? "#0d1f3c" : "#1d4ed8", border: "none", borderRadius: 10, color: "#fff", fontSize: 12, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", transition: "all 0.2s" }}>
+              {chatLoading ? "Thinking..." : "Ask Nerve →"}
+            </button>
           </div>
-          <div style={{ marginTop: 12, fontSize: 11, color: "#444" }}>
-            Ask Nerve anything about your D2C financials • Powered by Gemini 2.5 Flash
+          {reply && (
+            <div style={{ marginTop: 16, padding: "20px 22px", background: "#0a1322", border: "1px solid #1e3a5f", borderRadius: 10 }}>
+              <div style={{ fontSize: 9, color: "#334155", letterSpacing: "3px", marginBottom: 10, fontFamily: "ui-monospace, 'SF Mono', Consolas, monospace" }}>NERVE SAYS</div>
+              <div style={{ fontSize: 13, color: "#cbd5e1", lineHeight: 1.8, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>{reply}</div>
+            </div>
+          )}
+          <div style={{ marginTop: 12, fontSize: 10, color: "#1e3a5f", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
+            Powered by Gemini 2.5 Flash · Connected to your live Stripe + Shopify data
           </div>
         </div>
 
