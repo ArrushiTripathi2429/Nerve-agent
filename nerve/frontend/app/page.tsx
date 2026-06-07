@@ -61,6 +61,8 @@ export default function NerveDashboard() {
   const [chat, setChat] = useState("");
   const [reply, setReply] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
+  const [headerSmall, setHeaderSmall] = useState(false);
+  const [streamingReply, setStreamingReply] = useState("");
 
   useEffect(() => { fetchAll(); }, []);
   useEffect(() => { runWhatIf(); }, [adSpend, pauseZombie, delayPayment]);
@@ -73,6 +75,8 @@ export default function NerveDashboard() {
     } catch (e) { console.error(e); }
     setLoading(false);
   }
+
+  
 
   async function runWhatIf() {
     try {
@@ -91,12 +95,50 @@ export default function NerveDashboard() {
   }
 
   const handleAsk = async () => {
-    if (!chat.trim()) return;
-    setChatLoading(true); setReply("");
-    const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: chat }) });
-    const data = await res.json();
-    setReply(data.reply); setChatLoading(false); setChat("");
-  };
+  if (!chat.trim()) return;
+  setChatLoading(true);
+  setReply("");
+  setStreamingReply("");
+
+  const res = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: chat, stream: true }),
+  });
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let accumulated = "";
+
+  setChat("");
+  setChatLoading(false);
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    const chunk = decoder.decode(value);
+    const lines = chunk.split("\n");
+
+    for (const line of lines) {
+      if (line.startsWith("data: ") && line !== "data: [DONE]") {
+        try {
+          const parsed = JSON.parse(line.slice(6));
+          if (parsed.type === "text") {
+            accumulated += parsed.content;
+            setStreamingReply(accumulated);
+          } else if (parsed.type === "action_progress") {
+            // action hone pe dashboard refresh
+            fetchAll();
+          }
+        } catch {}
+      }
+    }
+  }
+
+  setReply(accumulated);
+  setStreamingReply("");
+};
 
   if (loading) return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#05091a" }}>
@@ -1669,12 +1711,15 @@ export default function NerveDashboard() {
               {chatLoading ? "Thinking..." : "Ask Nerve →"}
             </button>
           </div>
-          {reply && (
-            <div style={{ marginTop: 16, padding: "20px 22px", background: "#0a1322", border: "1px solid #1e3a5f", borderRadius: 10 }}>
-              <div style={{ fontSize: 9, color: "#334155", letterSpacing: "3px", marginBottom: 10, fontFamily: "ui-monospace, 'SF Mono', Consolas, monospace" }}>NERVE SAYS</div>
-              <div style={{ fontSize: 13, color: "#cbd5e1", lineHeight: 1.8, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>{reply}</div>
-            </div>
-          )}
+       {(reply || streamingReply) && (
+  <div style={{ marginTop: 16, padding: "20px 22px", background: "#0a1322", border: "1px solid #1e3a5f", borderRadius: 10 }}>
+    <div style={{ fontSize: 9, color: "#334155", letterSpacing: "3px", marginBottom: 10, fontFamily: "ui-monospace, 'SF Mono', Consolas, monospace" }}>NERVE SAYS</div>
+    <div style={{ fontSize: 13, color: "#cbd5e1", lineHeight: 1.8, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
+      {streamingReply || reply}
+      {streamingReply && <span style={{ borderRight: "2px solid #60a5fa", marginLeft: 2, animation: "pulse 1s infinite" }} />}
+    </div>
+  </div>
+)}
           <div style={{ marginTop: 12, fontSize: 10, color: "#1e3a5f", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
             Powered by Gemini 2.5 Flash · Connected to your live Stripe + Shopify data
           </div>

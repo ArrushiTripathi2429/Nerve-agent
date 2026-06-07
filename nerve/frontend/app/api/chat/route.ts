@@ -1,21 +1,28 @@
 import { NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY ?? "");
 
 export async function POST(req: Request) {
-  const { message } = await req.json();
+  const { message, history = [], stream = false } = await req.json();
 
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
+  if (stream) {
+    const response = await fetch("http://localhost:8000/api/chat/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, history }),
+    });
+    return new Response(response.body, {
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  }
 
-  const prompt = `You are Nerve, a D2C financial intelligence assistant for a jewellery brand.
-You help analyze business data like orders, revenue, margins, and customer trends.
-Answer concisely and actionably.
-
-User question: ${message}`;
-
-  const result = await model.generateContent(prompt);
-  const response = result.response.text();
-
-  return NextResponse.json({ reply: response });
+  const response = await fetch("http://localhost:8000/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message, history }),
+  });
+  const data = await response.json();
+  return NextResponse.json({
+    reply: data.reply,
+    actions_taken: data.actions_taken || [],
+    refresh_dashboard: data.refresh_dashboard || false,
+  });
 }
