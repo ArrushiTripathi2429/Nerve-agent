@@ -14,31 +14,31 @@ type WhatIfResult = { baseline: { runway_days: number; true_cash: number; silent
 const SIGNAL_META: { [key: string]: { name: string; icon: string; headline: (s: Signal) => string; subline: (s: Signal) => string; } } = {
   zombie_sku: {
     name: "Dead Stock Alert",
-    icon: "📦",
+    icon: "",
     headline: (s) => s.status === "CRITICAL" ? `${s.zombies?.length || 0} products haven't sold in 30+ days` : "All products are moving. Nice work!",
     subline: (s) => s.status === "CRITICAL" ? `You're bleeding Rs.${s.total_locked_capital?.toLocaleString()} in stock nobody wants — and still paying ads for it.` : "Your inventory is healthy with no dead stock sitting around.",
   },
   cash_cliff: {
     name: "Cash Runway",
-    icon: "💸",
+    icon: "",
     headline: (s) => s.status === "CRITICAL" ? `You'll run out of cash in ${s.runway_days} days` : s.status === "WARNING" ? `${s.runway_days} days of cash left — stay alert` : `${s.runway_days} days of cash runway. You're good.`,
     subline: (s) => s.status === "CRITICAL" ? `At your current burn rate of Rs.${s.daily_burn_rate?.toLocaleString()}/day, the clock is ticking loud.` : s.status === "WARNING" ? "Not urgent, but now is a good time to reduce non-essential spending." : "Your cash position is comfortable. Keep monitoring monthly.",
   },
   margin_drift: {
     name: "Profit Margin",
-    icon: "📉",
+    icon: "",
     headline: (s) => s.status === "CRITICAL" ? `Your margins just fell ${Math.abs(s.drift || 0)}% in 30 days` : s.status === "WARNING" ? "Margins slipping slightly — keep an eye out" : "Your profit margins are rock solid",
     subline: (s) => s.status === "CRITICAL" ? `From ${s.previous_margin}% down to ${s.current_margin}%. You're selling more but making less. Your ROAS dashboard is hiding this.` : "Every rupee of revenue is converting well to profit.",
   },
   inventory_collision: {
     name: "Stock vs Bills",
-    icon: "⚡",
+    icon: "",
     headline: (s) => s.status === "CRITICAL" ? `Money stuck in stock + big bill due in ${s.nearest_due_days} days` : "Your inventory and bills are in balance",
     subline: (s) => s.status === "CRITICAL" ? `Rs.${s.locked_capital?.toLocaleString()} frozen in unsold inventory while Rs.${s.upcoming_bills?.toLocaleString()} in bills are coming. Classic cash crunch setup.` : "No dangerous overlap between your stock investment and upcoming payments.",
   },
   phantom_liability: {
     name: "Hidden Ad Debt",
-    icon: "👻",
+    icon: "",
     headline: (s) => s.status === "CRITICAL" ? `Your real cash is Rs.${s.true_cash?.toLocaleString()} — not what your bank says` : "Your ad bills are under control",
     subline: (s) => s.status === "CRITICAL" ? `Rs.${s.total_unbilled?.toLocaleString()} in Meta/Google ads will auto-charge soon. Your bank looks fine. It's not.` : "No surprise ad charges lurking. Your balance is what it says.",
   },
@@ -142,11 +142,11 @@ export default function NerveDashboard() {
   {/* Center — NERVE + subheading */}
   <div style={{ textAlign: "center", marginBottom: 24 }}>
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 8 }}>
-      <span style={{ fontSize: 56, fontWeight: 900, color: "#fff", fontFamily: "-apple-system, sans-serif", letterSpacing: "-2px" }}>NERVE</span>
+      <span style={{ fontSize: 60, fontWeight: 900, color: "#fff", fontFamily: "-apple-system, sans-serif", letterSpacing: "-2px" }}>NERVE</span>
       <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#60a5fa", animation: "pulse 2s infinite", display: "inline-block" }} />
     </div>
     <div style={{ fontSize: 13, color: "#94a3b8", letterSpacing: "3px", textTransform: "uppercase", fontFamily: "ui-monospace, Consolas, monospace" }}>
-      Your business is bleeding money in silence. Nerve finds it before it kills you.
+      Your business health monitor. We find hidden problems, explain them simply, and show you exactly what to do next.
     </div>
   </div>
 
@@ -791,154 +791,867 @@ export default function NerveDashboard() {
   </div>
 )}
 
-        {/* ── ACTIONS ── */}
-        <div className="fade3" style={{ marginBottom: 36 }}>
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 11, color: "#334155", letterSpacing: "4px", textTransform: "uppercase", fontFamily: "ui-monospace, 'SF Mono', Consolas, monospace", marginBottom: 4 }}>Your Move</div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: "#fff", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>Stop the bleeding. Here's exactly what to do.</div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
-            {[
-              { id: "pause_zombie_ads", icon: "⏸", label: "Kill the Zombie Ads", tagline: "Stop paying to promote products nobody buys.", desc: "You're wasting ad budget on dead SKUs. One click stops the bleed.", severity: "CRITICAL", color: "#f87171" },
-              { id: "flash_discount", icon: "", label: "Flash Sale: Free the Cash", tagline: "Turn dead stock into working capital today.", desc: "40% off flash sale on slow movers. Get your money back out of the shelf.", severity: "CRITICAL", color: "#fb923c" },
-              { id: "send_receivable_reminder", icon: "📨", label: "Chase That Money", tagline: "Someone owes you — go collect.", desc: "Send automated payment reminders. Get paid faster without the awkward call.", severity: "WARNING", color: "#fbbf24" },
-              { id: "reduce_ad_budget", icon: "", label: "Trim the Fat", tagline: "Your hidden ad bills are eating you alive.", desc: "Reduce Meta/Google budget 30% to stop phantom liability from piling up.", severity: "WARNING", color: "#a78bfa" },
-            ].map((action) => {
-              const done = executed[action.id];
-              return (
-                <div key={action.id} className="hover-card" style={{ borderRadius: 14, border: `1px solid ${done ? "rgba(74,222,128,0.2)" : "#0d1f3c"}`, background: "#080f1e", padding: "22px 20px", display: "flex", flexDirection: "column" }}>
-                  <div style={{ fontSize: 26, marginBottom: 12 }}>{action.icon}</div>
-                  <div style={{ fontSize: 11, color: action.color, marginBottom: 6, fontFamily: "ui-monospace, 'SF Mono', Consolas, monospace", letterSpacing: "1px" }}>{action.tagline}</div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", marginBottom: 8, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", lineHeight: 1.3 }}>{action.label}</div>
-                  <div style={{ fontSize: 11, color: "#334155", lineHeight: 1.6, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", marginBottom: 16, flex: 1 }}>{action.desc}</div>
-                  {done ? (
-                    <div>
-                      <div style={{ fontSize: 12, color: "#4ade80", marginBottom: 4 }}>Done! {done.message}</div>
-                      <div style={{ fontSize: 10, color: "#334155" }}>{done.impact}</div>
-                    </div>
-                  ) : (
-                    <button className="exec-btn" onClick={() => executeAction(action.id)} disabled={executing === action.id} style={{ width: "100%", padding: "9px 14px", borderRadius: 8, border: "1px solid #1e3a5f", background: "transparent", cursor: "pointer", fontSize: 11, color: "#60a5fa", fontFamily: "inherit" }}>
-                      {executing === action.id ? "Working..." : "Execute via Nerve →"}
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+      {/* ── RECOMMENDED ACTIONS ── */}
+<div className="fade3" style={{ marginBottom: 40 }}>
+  <div style={{ marginBottom: 24 }}>
+    <div
+      style={{
+        color: "#60a5fa",
+        fontSize: 12,
+        fontWeight: 700,
+        letterSpacing: "2px",
+        marginBottom: 6,
+      }}
+    >
+      RECOMMENDED ACTIONS
+    </div>
+
+    <div
+      style={{
+        color: "#fff",
+        fontSize: 30,
+        fontWeight: 800,
+        marginBottom: 8,
+        lineHeight: 1.2,
+      }}
+    >
+      AI-Generated Action Plan
+    </div>
+
+    <div
+      style={{
+        color: "#94a3b8",
+        fontSize: 14,
+        maxWidth: 720,
+        lineHeight: 1.7,
+      }}
+    >
+      Based on your financial signals, Nerve has identified the highest-impact
+      actions that can improve liquidity, reduce risk, and strengthen business
+      health.
+    </div>
+  </div>
+
+  <div
+    style={{
+      display: "grid",
+      gridTemplateColumns: "repeat(4, 1fr)",
+      gap: 16,
+    }}
+  >
+    {[
+      {
+        id: "pause_zombie_ads",
+    
+        label: "Pause Low-Performing Product Campaigns",
+        tagline: "Highest Financial Impact",
+        desc:
+          "Nerve detected advertising spend on products with consistently low sales velocity. Pausing these campaigns can immediately reduce waste and improve cash efficiency.",
+      },
+      {
+        id: "flash_discount",
+    
+        label: "Liquidate Slow-Moving Inventory",
+        tagline: "Unlock Trapped Capital",
+        desc:
+          "Convert dormant inventory into working capital through targeted discounts and inventory clearance campaigns.",
+      },
+      {
+        id: "send_receivable_reminder",
+      
+        label: "Recover Outstanding Payments",
+        tagline: "Improve Cash Flow",
+        desc:
+          "Automatically follow up on unpaid invoices and receivables to accelerate cash collection and strengthen liquidity.",
+      },
+      {
+        id: "reduce_ad_budget",
+      
+        label: "Optimize Marketing Spend",
+        tagline: "Reduce Hidden Liabilities",
+        desc:
+          "Adjust advertising budgets to align spending with current cash position and prevent future payment obligations from accumulating.",
+      },
+    ].map((action) => {
+      const done = executed[action.id];
+
+    return (
+  <div
+    key={action.id}
+    className="hover-card"
+    style={{
+      borderRadius: 20,
+      padding: 22,
+      display: "flex",
+      flexDirection: "column",
+      background:
+        "linear-gradient(135deg, rgba(13,31,60,0.95), rgba(8,15,30,0.95))",
+      border: done
+        ? "1px solid rgba(74,222,128,0.20)"
+        : "1px solid rgba(96,165,250,0.10)",
+      boxShadow: "0 10px 40px rgba(59,130,246,0.05)",
+      minHeight: 280,
+    }}
+  >
+    {/* Header */}
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "flex-start",
+        marginBottom: 12,
+      }}
+    >
+      <div
+        style={{
+          color: "#fff",
+          fontSize: 16,
+          fontWeight: 700,
+          lineHeight: 1.4,
+          maxWidth: "75%",
+          fontFamily:
+            "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        }}
+      >
+        {action.label}
+      </div>
+
+      <div
+        style={{
+          padding: "4px 8px",
+          borderRadius: 999,
+          background: "rgba(96,165,250,0.08)",
+          border: "1px solid rgba(96,165,250,0.15)",
+          color: "#60a5fa",
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: "0.5px",
+          whiteSpace: "nowrap",
+        }}
+      >
+        HIGH IMPACT
+      </div>
+    </div>
+
+    {/* Tagline */}
+    <div
+      style={{
+        color: "#60a5fa",
+        fontSize: 11,
+        fontWeight: 600,
+        marginBottom: 12,
+        fontFamily:
+          "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      }}
+    >
+      {action.tagline}
+    </div>
+
+    {/* Description */}
+    <div
+      style={{
+        color: "#94a3b8",
+        fontSize: 12,
+        lineHeight: 1.7,
+        flex: 1,
+        marginBottom: 20,
+        fontFamily:
+          "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      }}
+    >
+      {action.desc}
+    </div>
+
+    {done ? (
+      <div
+        style={{
+          padding: 12,
+          borderRadius: 12,
+          background: "rgba(74,222,128,0.08)",
+          border: "1px solid rgba(74,222,128,0.15)",
+        }}
+      >
+        <div
+          style={{
+            color: "#4ade80",
+            fontSize: 12,
+            fontWeight: 700,
+            marginBottom: 4,
+          }}
+        >
+          Recommendation Applied
         </div>
 
-        {/* ── WHAT IF ── */}
-        <div className="fade4" style={{ marginBottom: 36, background: "#080f1e", border: "1px solid #0d1f3c", borderRadius: 16, padding: "32px 32px" }}>
-          <div style={{ marginBottom: 24 }}>
-            <div style={{ fontSize: 11, color: "#334155", letterSpacing: "4px", textTransform: "uppercase", fontFamily: "ui-monospace, 'SF Mono', Consolas, monospace", marginBottom: 4 }}>What-If Simulator</div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: "#fff", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>Play it safe. Test decisions before you make them.</div>
-            <div style={{ fontSize: 12, color: "#334155", marginTop: 6, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>Move the sliders and watch how your business metrics change — in real time.</div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 40 }}>
-            <div>
-              {[
-                { label: "What if I change my ad spend by", value: adSpend, min: -50, max: 50, step: 5, unit: "%", color: "#60a5fa", onChange: setAdSpend, left: "Cut 50%", right: "Increase 50%", desc: adSpend < 0 ? "Good move — freeing up cash" : adSpend > 0 ? "More spend = more phantom debt risk" : "No change" },
-                { label: "What if I delay supplier payment by", value: delayPayment, min: 0, max: 30, step: 5, unit: " days", color: "#fbbf24", onChange: setDelayPayment, left: "Pay now", right: "Delay 30d", desc: delayPayment > 0 ? "Buys time but damages supplier trust" : "Paying on time" },
-              ].map((sl) => (
-                <div key={sl.label} style={{ marginBottom: 28 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#94a3b8", marginBottom: 10, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
-                    <span>{sl.label}</span>
-                    <span style={{ color: sl.color, fontWeight: 700, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>{sl.value > 0 ? "+" : ""}{sl.value}{sl.unit}</span>
-                  </div>
-                  <input type="range" min={sl.min} max={sl.max} value={sl.value} step={sl.step}
-                    onChange={(e) => sl.onChange(Number(e.target.value))}
-                    style={{ width: "100%", accentColor: sl.color, background: `linear-gradient(to right, ${sl.color} ${((sl.value - sl.min) / (sl.max - sl.min)) * 100}%, #0d1f3c ${((sl.value - sl.min) / (sl.max - sl.min)) * 100}%)` }}
-                  />
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#1e3a5f", marginTop: 4 }}>
-                    <span>{sl.left}</span><span>{sl.right}</span>
-                  </div>
-                  <div style={{ fontSize: 10, color: "#334155", marginTop: 6, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>{sl.desc}</div>
-                </div>
-              ))}
-              <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", background: "#0a1322", borderRadius: 10, cursor: "pointer", border: `1px solid ${pauseZombie ? "rgba(74,222,128,0.2)" : "#0d1f3c"}` }} onClick={() => setPauseZombie(!pauseZombie)}>
-                <div style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${pauseZombie ? "#4ade80" : "#1e3a5f"}`, background: pauseZombie ? "#4ade80" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  {pauseZombie && <span style={{ fontSize: 10, color: "#000" }}>✓</span>}
-                </div>
-                <div>
-                  <div style={{ fontSize: 12, color: "#94a3b8", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>Stop all ads on dead products</div>
-                  <div style={{ fontSize: 10, color: "#334155" }}>See how much cash this frees up instantly</div>
-                </div>
-              </div>
-            </div>
-
-            {whatif && (
-              <div>
-                <div style={{ fontSize: 11, color: "#334155", marginBottom: 14, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>Here's what your business would look like:</div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
-                  {[
-                    { icon: "", label: "Days of Cash Left", base: `${whatif.baseline.runway_days}d`, proj: `${whatif.projected.runway_days}d`, change: whatif.improvement.runway_change, wantPositive: true },
-                    { icon: "", label: "Real Cash Available", base: `Rs.${Math.round(whatif.baseline.true_cash).toLocaleString()}`, proj: `Rs.${Math.round(whatif.projected.true_cash).toLocaleString()}`, change: whatif.projected.true_cash - whatif.baseline.true_cash, wantPositive: true },
-                    { icon: "", label: "Risk Score", base: `${whatif.baseline.silent_killer_score}`, proj: `${whatif.projected.silent_killer_score}`, change: -(whatif.improvement.score_change), wantPositive: false },
-                    { icon: "", label: "Cash Unlocked", base: "Rs.0", proj: `Rs.${Math.round(whatif.projected.freed_capital).toLocaleString()}`, change: whatif.projected.freed_capital, wantPositive: true },
-                  ].map((item) => {
-                    const improved = item.wantPositive ? item.change > 0 : item.change < 0;
-                    const worsened = item.wantPositive ? item.change < 0 : item.change > 0;
-                    return (
-                      <div key={item.label} style={{ background: "#0a1322", borderRadius: 10, padding: "14px 16px", border: "1px solid #0d1f3c" }}>
-                        <div style={{ fontSize: 18, marginBottom: 6 }}>{item.icon}</div>
-                        <div style={{ fontSize: 10, color: "#334155", marginBottom: 4, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>{item.label}</div>
-                        <div style={{ fontSize: 10, color: "#1e3a5f", marginBottom: 2 }}>{item.base} →</div>
-                        <div style={{ fontSize: 18, fontWeight: 800, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: improved ? "#4ade80" : worsened ? "#f87171" : "#60a5fa" }}>{item.proj}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-                <ResponsiveContainer width="100%" height={100}>
-                  <AreaChart data={[{ name: "Now", score: whatif.baseline.silent_killer_score }, { name: "After", score: whatif.projected.silent_killer_score }]}>
-                    <XAxis dataKey="name" tick={{ fill: "#334155", fontSize: 10 }} axisLine={false} tickLine={false} />
-                    <YAxis domain={[0, 100]} tick={{ fill: "#334155", fontSize: 10 }} axisLine={false} tickLine={false} />
-                    <Tooltip contentStyle={{ background: "#080f1e", border: "1px solid #1e3a5f", borderRadius: 8, fontSize: 11 }} />
-                    <Area type="monotone" dataKey="score" stroke="#60a5fa" fill="rgba(96,165,250,0.06)" strokeWidth={2} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </div>
+        <div
+          style={{
+            color: "#94a3b8",
+            fontSize: 11,
+            marginBottom: 4,
+          }}
+        >
+          {done.message}
         </div>
 
-        {/* ── CHARTS ── */}
-        {score && (
-          <div className="fade5" style={{ marginBottom: 36 }}>
-            <div style={{ fontSize: 11, color: "#334155", letterSpacing: "4px", textTransform: "uppercase", fontFamily: "ui-monospace, 'SF Mono', Consolas, monospace", marginBottom: 20 }}>Financial Overview</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-              {[
+        <div
+          style={{
+            color: "#64748b",
+            fontSize: 10,
+          }}
+        >
+          {done.impact}
+        </div>
+      </div>
+    ) : (
+      <button
+        className="exec-btn"
+        onClick={() => executeAction(action.id)}
+        disabled={executing === action.id}
+        style={{
+          width: "100%",
+          padding: "12px 16px",
+          borderRadius: 12,
+          border: "1px solid rgba(96,165,250,0.15)",
+          background: "rgba(96,165,250,0.08)",
+          color: "#60a5fa",
+          cursor: "pointer",
+          fontSize: 12,
+          fontWeight: 600,
+          transition: "all .2s ease",
+        }}
+      >
+        {executing === action.id
+          ? "Applying..."
+          : "Apply Recommendation →"}
+      </button>
+    )}
+  </div>
+
+  )})}
+  </div>
+</div>
+
+  {/* ── SCENARIO LAB ── */}
+<div
+  className="fade4"
+  style={{
+    marginBottom: 40,
+    padding: "32px",
+    borderRadius: 24,
+    background:
+      "linear-gradient(135deg, rgba(13,31,60,0.95), rgba(8,15,30,0.95))",
+    border: "1px solid rgba(96,165,250,0.12)",
+    boxShadow: "0 10px 40px rgba(59,130,246,0.08)",
+  }}
+>
+  {/* Header */}
+  <div style={{ marginBottom: 28 }}>
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: 12,
+      }}
+    >
+      <div>
+        <div
+          style={{
+            color: "#60a5fa",
+            fontSize: 12,
+            fontWeight: 700,
+            letterSpacing: "2px",
+            marginBottom: 6,
+          }}
+        >
+          SCENARIO LAB
+        </div>
+
+        <div
+          style={{
+            color: "#fff",
+            fontSize: 30,
+            fontWeight: 800,
+            lineHeight: 1.2,
+          }}
+        >
+          Simulate Before You Execute
+        </div>
+      </div>
+
+      <div
+        style={{
+          padding: "8px 14px",
+          borderRadius: 999,
+          background: "rgba(96,165,250,0.08)",
+          border: "1px solid rgba(96,165,250,0.15)",
+          color: "#60a5fa",
+          fontSize: 12,
+          fontWeight: 600,
+        }}
+      >
+        Live Projection
+      </div>
+    </div>
+
+    <div
+      style={{
+        color: "#94a3b8",
+        fontSize: 14,
+        lineHeight: 1.8,
+      }}
+    >
+      Test financial decisions before making them. Nerve forecasts how
+      changes affect runway, cash flow and risk score in real time.
+    </div>
+  </div>
+
+  <div
+    style={{
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr",
+      gap: 40,
+    }}
+  >
+    {/* LEFT SIDE */}
+    <div>
+      {[
+        {
+          label: "Ad Spend Adjustment",
+          value: adSpend,
+          min: -50,
+          max: 50,
+          step: 5,
+          unit: "%",
+          color: "#60a5fa",
+          onChange: setAdSpend,
+          left: "Cut 50%",
+          right: "Increase 50%",
+          desc:
+            adSpend < 0
+              ? "Freeing up working capital"
+              : adSpend > 0
+              ? "Higher spend increases liability"
+              : "No change",
+        },
+        {
+          label: "Supplier Payment Delay",
+          value: delayPayment,
+          min: 0,
+          max: 30,
+          step: 5,
+          unit: "d",
+          color: "#60a5fa",
+          onChange: setDelayPayment,
+          left: "Pay Now",
+          right: "Delay 30d",
+          desc:
+            delayPayment > 0
+              ? "Improves liquidity short-term"
+              : "Paying on time",
+        },
+      ].map((sl) => (
+        <div
+          key={sl.label}
+          style={{
+            marginBottom: 24,
+            padding: 18,
+            borderRadius: 16,
+            background: "rgba(255,255,255,0.02)",
+            border: "1px solid rgba(96,165,250,0.08)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              marginBottom: 12,
+            }}
+          >
+            <span
+              style={{
+                color: "#e2e8f0",
+                fontSize: 13,
+                fontWeight: 600,
+              }}
+            >
+              {sl.label}
+            </span>
+
+            <span
+              style={{
+                color: "#60a5fa",
+                fontWeight: 700,
+              }}
+            >
+              {sl.value > 0 ? "+" : ""}
+              {sl.value}
+              {sl.unit}
+            </span>
+          </div>
+
+          <input
+            type="range"
+            min={sl.min}
+            max={sl.max}
+            value={sl.value}
+            step={sl.step}
+            onChange={(e) => sl.onChange(Number(e.target.value))}
+            style={{
+              width: "100%",
+              accentColor: sl.color,
+            }}
+          />
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              marginTop: 8,
+              fontSize: 10,
+              color: "#64748b",
+            }}
+          >
+            <span>{sl.left}</span>
+            <span>{sl.right}</span>
+          </div>
+
+          <div
+            style={{
+              marginTop: 10,
+              color: "#94a3b8",
+              fontSize: 11,
+            }}
+          >
+            {sl.desc}
+          </div>
+        </div>
+      ))}
+
+      <div
+        onClick={() => setPauseZombie(!pauseZombie)}
+        style={{
+          padding: 18,
+          borderRadius: 16,
+          cursor: "pointer",
+          display: "flex",
+          gap: 14,
+          alignItems: "center",
+          background: "rgba(255,255,255,0.02)",
+          border: pauseZombie
+            ? "1px solid rgba(96,165,250,0.25)"
+            : "1px solid rgba(96,165,250,0.08)",
+        }}
+      >
+        <div
+          style={{
+            width: 22,
+            height: 22,
+            borderRadius: 6,
+            border: "2px solid #60a5fa",
+            background: pauseZombie ? "#60a5fa" : "transparent",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            color: "#000",
+            fontWeight: 700,
+          }}
+        >
+          {pauseZombie && "✓"}
+        </div>
+
+        <div>
+          <div
+            style={{
+              color: "#e2e8f0",
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            Stop Zombie Product Ads
+          </div>
+
+          <div
+            style={{
+              color: "#94a3b8",
+              fontSize: 11,
+              marginTop: 4,
+            }}
+          >
+            Instantly simulate recovered capital.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {/* RIGHT SIDE */}
+    {whatif && (
+      <div>
+        <div
+          style={{
+            color: "#60a5fa",
+            fontSize: 12,
+            fontWeight: 700,
+            letterSpacing: "1px",
+            marginBottom: 14,
+          }}
+        >
+          PROJECTED OUTCOME
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 12,
+            marginBottom: 20,
+          }}
+        >
+          {[
+            {
+              icon: "",
+              label: "Cash Runway",
+              proj: `${whatif.projected.runway_days}d`,
+              change: whatif.improvement.runway_change,
+              positive: true,
+            },
+            {
+              icon: "",
+              label: "True Cash",
+              proj: `₹${Math.round(
+                whatif.projected.true_cash
+              ).toLocaleString()}`,
+              change:
+                whatif.projected.true_cash -
+                whatif.baseline.true_cash,
+              positive: true,
+            },
+            {
+              icon: "",
+              label: "Risk Score",
+              proj: `${whatif.projected.silent_killer_score}`,
+              change: -whatif.improvement.score_change,
+              positive: false,
+            },
+            {
+              icon: "",
+              label: "Cash Unlocked",
+              proj: `₹${Math.round(
+                whatif.projected.freed_capital
+              ).toLocaleString()}`,
+              change: whatif.projected.freed_capital,
+              positive: true,
+            },
+          ].map((item) => {
+            const improved = item.positive
+              ? item.change > 0
+              : item.change < 0;
+
+            return (
+              <div
+                key={item.label}
+                style={{
+                  background: "rgba(255,255,255,0.02)",
+                  border: "1px solid rgba(96,165,250,0.08)",
+                  borderRadius: 18,
+                  padding: 18,
+                }}
+              >
+                <div style={{ fontSize: 20, marginBottom: 8 }}>
+                  {item.icon}
+                </div>
+
+                <div
+                  style={{
+                    color: "#64748b",
+                    fontSize: 11,
+                    marginBottom: 8,
+                  }}
+                >
+                  {item.label}
+                </div>
+
+                <div
+                  style={{
+                    fontSize: 24,
+                    fontWeight: 800,
+                    color: improved ? "#4ade80" : "#60a5fa",
+                  }}
+                >
+                  {item.proj}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div
+          style={{
+            background: "rgba(255,255,255,0.02)",
+            border: "1px solid rgba(96,165,250,0.08)",
+            borderRadius: 18,
+            padding: 16,
+          }}
+        >
+          <ResponsiveContainer width="100%" height={140}>
+            <AreaChart
+              data={[
                 {
-                  title: "Your bank says one thing. Reality says another.",
-                  sub: "The gap between your bank balance and what's actually spendable after hidden costs.",
-                  color: "#60a5fa",
-                  fill: "rgba(96,165,250,0.06)",
-                  data: [{ name: "Bank Balance", amount: score.signals.cash_cliff?.bank_balance || 0 }, { name: "Real Cash", amount: score.signals.phantom_liability?.true_cash || 0 }, { name: "After Bills", amount: score.signals.cash_cliff?.net_position || 0 }]
+                  name: "Now",
+                  score: whatif.baseline.silent_killer_score,
                 },
                 {
-                  title: "Where your money is actually stuck.",
-                  sub: "Unsold stock, pending ad bills, and upcoming payments — all locking up your cash flow.",
-                  color: "#fbbf24",
-                  fill: "rgba(251,191,36,0.05)",
-                  data: [{ name: "Free Cash", amount: score.signals.phantom_liability?.true_cash || 0 }, { name: "Dead Stock", amount: score.signals.zombie_sku?.total_locked_capital || 0 }, { name: "Ad Bills", amount: score.signals.phantom_liability?.total_unbilled || 0 }, { name: "Due Bills", amount: score.signals.inventory_collision?.upcoming_bills || 0 }]
-                }
-              ].map((chart) => (
-                <div key={chart.title} className="hover-card" style={{ background: "#080f1e", border: "1px solid #0d1f3c", borderRadius: 14, padding: "22px 22px" }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "#cbd5e1", marginBottom: 4, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", lineHeight: 1.3 }}>{chart.title}</div>
-                  <div style={{ fontSize: 10, color: "#334155", marginBottom: 16, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>{chart.sub}</div>
-                  <ResponsiveContainer width="100%" height={150}>
-                    <AreaChart data={chart.data}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#0d1f3c" />
-                      <XAxis dataKey="name" tick={{ fill: "#334155", fontSize: 9 }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fill: "#334155", fontSize: 9 }} tickFormatter={(v) => `Rs.${(v / 1000).toFixed(0)}k`} axisLine={false} tickLine={false} />
-                      <Tooltip contentStyle={{ background: "#080f1e", border: "1px solid #1e3a5f", borderRadius: 8, fontSize: 11 }} formatter={(v: any) => [`Rs.${Math.round(v).toLocaleString()}`, ""]} />
-                      <Area type="monotone" dataKey="amount" stroke={chart.color} fill={chart.fill} strokeWidth={2} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              ))}
+                  name: "After",
+                  score: whatif.projected.silent_killer_score,
+                },
+              ]}
+            >
+              <XAxis
+                dataKey="name"
+                tick={{ fill: "#64748b", fontSize: 10 }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                domain={[0, 100]}
+                tick={{ fill: "#64748b", fontSize: 10 }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: "#08101f",
+                  border: "1px solid rgba(96,165,250,0.15)",
+                  borderRadius: 10,
+                }}
+              />
+              <Area
+                type="monotone"
+                dataKey="score"
+                stroke="#60a5fa"
+                fill="rgba(96,165,250,0.08)"
+                strokeWidth={3}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    )}
+  </div>
+</div>
+     {/* ── BUSINESS SNAPSHOT ── */}
+{score && (
+  <div className="fade5" style={{ marginBottom: 40 }}>
+    <div style={{ marginBottom: 24 }}>
+      <div
+        style={{
+          color: "#60a5fa",
+          fontSize: 12,
+          fontWeight: 700,
+          letterSpacing: "2px",
+          marginBottom: 6,
+        }}
+      >
+        BUSINESS SNAPSHOT
+      </div>
+
+      <div
+        style={{
+          color: "#fff",
+          fontSize: 30,
+          fontWeight: 800,
+          marginBottom: 8,
+        }}
+      >
+        Understand Your Money
+      </div>
+
+      <div
+        style={{
+          color: "#94a3b8",
+          fontSize: 14,
+        }}
+      >
+        Simple visual summaries of your business finances.
+      </div>
+    </div>
+
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr",
+        gap: 16,
+      }}
+    >
+      {[
+        {
+          title: "How much money can I actually use?",
+          sub: "Your available cash after deducting pending expenses.",
+          color: "#60a5fa",
+          fill: "rgba(96,165,250,0.08)",
+          total: score.signals.phantom_liability?.true_cash || 0,
+          data: [
+            {
+              name: "Bank Balance",
+              amount: score.signals.cash_cliff?.bank_balance || 0,
+            },
+            {
+              name: "Usable Cash",
+              amount: score.signals.phantom_liability?.true_cash || 0,
+            },
+            {
+              name: "After Bills",
+              amount: score.signals.cash_cliff?.net_position || 0,
+            },
+          ],
+        },
+        {
+          title: "Where is my money stuck?",
+          sub: "Money locked in inventory and unpaid expenses.",
+          color: "#60a5fa",
+          fill: "rgba(96,165,250,0.08)",
+          total:
+            (score.signals.zombie_sku?.total_locked_capital || 0) +
+            (score.signals.phantom_liability?.total_unbilled || 0),
+
+          data: [
+            {
+              name: "Available",
+              amount: score.signals.phantom_liability?.true_cash || 0,
+            },
+            {
+              name: "Old Stock",
+              amount: score.signals.zombie_sku?.total_locked_capital || 0,
+            },
+            {
+              name: "Ad Bills",
+              amount: score.signals.phantom_liability?.total_unbilled || 0,
+            },
+            {
+              name: "Upcoming Bills",
+              amount:
+                score.signals.inventory_collision?.upcoming_bills || 0,
+            },
+          ],
+        },
+      ].map((chart) => (
+        <div
+          key={chart.title}
+          className="hover-card"
+          style={{
+            background:
+              "linear-gradient(135deg, rgba(13,31,60,0.95), rgba(8,15,30,0.95))",
+            border: "1px solid rgba(96,165,250,0.10)",
+            borderRadius: 20,
+            padding: 24,
+          }}
+        >
+          <div
+            style={{
+              color: "#fff",
+              fontSize: 22,
+              fontWeight: 700,
+              marginBottom: 6,
+              lineHeight: 1.3,
+            }}
+          >
+            {chart.title}
+          </div>
+
+          <div
+            style={{
+              color: "#94a3b8",
+              fontSize: 13,
+              marginBottom: 16,
+            }}
+          >
+            {chart.sub}
+          </div>
+
+          <div
+            style={{
+              marginBottom: 18,
+            }}
+          >
+            <div
+              style={{
+                color: "#60a5fa",
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: "1px",
+                marginBottom: 4,
+              }}
+            >
+              TOTAL
+            </div>
+
+            <div
+              style={{
+                color: "#fff",
+                fontSize: 34,
+                fontWeight: 800,
+              }}
+            >
+              ₹{Math.round(chart.total).toLocaleString()}
             </div>
           </div>
-        )}
+
+          <ResponsiveContainer width="100%" height={240}>
+            <AreaChart data={chart.data}>
+              <CartesianGrid
+                strokeDasharray="3 3"
+                stroke="rgba(96,165,250,0.08)"
+              />
+
+              <XAxis
+                dataKey="name"
+                tick={{
+                  fill: "#94a3b8",
+                  fontSize: 11,
+                }}
+                axisLine={false}
+                tickLine={false}
+              />
+
+              <YAxis
+                tick={{
+                  fill: "#94a3b8",
+                  fontSize: 11,
+                }}
+                tickFormatter={(v) =>
+                  `₹${(v / 1000).toFixed(0)}k`
+                }
+                axisLine={false}
+                tickLine={false}
+              />
+
+              <Tooltip
+                contentStyle={{
+                  background: "#08101f",
+                  border:
+                    "1px solid rgba(96,165,250,0.15)",
+                  borderRadius: 12,
+                  color: "#fff",
+                }}
+                formatter={(v: any) => [
+                  `₹${Math.round(v).toLocaleString()}`,
+                  "",
+                ]}
+              />
+
+              <Area
+                type="monotone"
+                dataKey="amount"
+                stroke={chart.color}
+                fill={chart.fill}
+                strokeWidth={3}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      ))}
+    </div>
+  </div>
+)}
 
         {/* ── CHAT ── */}
         <div className="fade6" style={{ background: "#080f1e", border: "1px solid #0d1f3c", borderRadius: 16, padding: "28px 28px" }}>
@@ -968,6 +1681,165 @@ export default function NerveDashboard() {
         </div>
 
       </div>
+
+      {/* ── GLOSSARY ── */}
+<div
+  style={{
+    marginTop: 40,
+    marginBottom: 40,
+    padding: 32,
+    borderRadius: 24,
+    background:
+      "linear-gradient(135deg, rgba(13,31,60,0.95), rgba(8,15,30,0.95))",
+    border: "1px solid rgba(96,165,250,0.12)",
+  }}
+>
+  <div style={{ marginBottom: 24 }}>
+    <div
+      style={{
+        color: "#60a5fa",
+        fontSize: 12,
+        fontWeight: 700,
+        letterSpacing: "2px",
+        marginBottom: 6,
+      }}
+    >
+      NO MBA REQUIRED
+    </div>
+
+    <div
+      style={{
+        fontSize: 30,
+        fontWeight: 800,
+        color: "#fff",
+        marginBottom: 10,
+      }}
+    >
+      Financial Terms Explained
+    </div>
+
+    <div
+      style={{
+        color: "#94a3b8",
+        fontSize: 14,
+      }}
+    >
+      Simple explanations of the terms Nerve uses.
+    </div>
+  </div>
+
+  <div
+    style={{
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr",
+      gap: 14,
+    }}
+  >
+    {[
+      {
+        icon: "",
+        term: "Zombie SKU",
+        meaning:
+          "A product that has been sitting in your shop for a long time and nobody is buying it.",
+      },
+      {
+        icon: "",
+        term: "Cash Runway",
+        meaning:
+          "How many days your business can survive before cash runs out.",
+      },
+      {
+        icon: "",
+        term: "Ad Bills",
+        meaning:
+          "Advertising money you've already spent but haven't paid yet.",
+      },
+      {
+        icon: "",
+        term: "Inventory Collision",
+        meaning:
+          "Too much money stuck in stock while important bills are due soon.",
+      },
+      {
+        icon: "",
+        term: "Phantom Liability",
+        meaning:
+          "Hidden expenses that haven't been charged yet but will hit your account later.",
+      },
+      {
+        icon: "",
+        term: "Margin Drift",
+        meaning:
+          "Sales are increasing but actual profit is slowly decreasing.",
+      },
+      {
+        icon: "",
+        term: "Ad Spend Adjustment",
+        meaning:
+          "Increasing or decreasing your advertising budget.",
+      },
+      {
+        icon: "",
+        term: "Supplier Payment Delay",
+        meaning:
+          "Postponing payments to suppliers to keep cash available longer.",
+      },
+      {
+        icon: "",
+        term: "Cash Unlocked",
+        meaning:
+          "Money freed up by reducing wasteful spending or selling old stock.",
+      },
+      {
+        icon: "",
+        term: "Risk Score",
+        meaning:
+          "Nerve's estimate of how financially healthy or risky your business is.",
+      },
+    ].map((item) => (
+      <div
+        key={item.term}
+        style={{
+          padding: 18,
+          borderRadius: 18,
+          background: "rgba(255,255,255,0.02)",
+          border: "1px solid rgba(96,165,250,0.08)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            marginBottom: 8,
+          }}
+        >
+          <span style={{ fontSize: 20 }}>{item.icon}</span>
+
+          <span
+            style={{
+              color: "#fff",
+              fontWeight: 700,
+              fontSize: 14,
+            }}
+          >
+            {item.term}
+          </span>
+        </div>
+
+        <div
+          style={{
+            color: "#94a3b8",
+            fontSize: 13,
+            lineHeight: 1.7,
+          }}
+        >
+          {item.meaning}
+        </div>
+      </div>
+    ))}
+  </div>
+</div>
     </div>
   );
 }
