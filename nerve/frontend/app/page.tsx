@@ -5,7 +5,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from "recharts";
 
-const API = "http://localhost:8000/api";
+const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
 type Signal = { status: string; severity: number; alert: string; [key: string]: any; };
 type ScoreData = { silent_killer_score: number; risk_level: string; cross_signal_reason: string | null; cross_signal_bonus: number; signals: { [key: string]: Signal }; };
