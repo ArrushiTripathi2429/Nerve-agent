@@ -62,10 +62,16 @@ export default function NerveDashboard() {
   const [reply, setReply] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [headerSmall, setHeaderSmall] = useState(false);
-  const [streamingReply, setStreamingReply] = useState("");
+
+  const [sessions, setSessions] = useState<any[]>([]);
+const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+const [messages, setMessages] = useState<{role: string, content: string}[]>([]);
+const [streamingReply, setStreamingReply] = useState("");
+const [sidebarOpen, setSidebarOpen] = useState(true);
 
   useEffect(() => { fetchAll(); }, []);
   useEffect(() => { runWhatIf(); }, [adSpend, pauseZombie, delayPayment]);
+  useEffect(() => { fetchAll(); loadSessions(); }, []);
 
   async function fetchAll() {
     setLoading(true);
@@ -94,50 +100,72 @@ export default function NerveDashboard() {
     setExecuting(null);
   }
 
-  const handleAsk = async () => {
-  if (!chat.trim()) return;
-  setChatLoading(true);
-  setReply("");
-  setStreamingReply("");
+  async function loadSessions() {
+  try {
+    const res = await axios.get(`${API}/chat/sessions`);
+    setSessions(res.data.sessions || []);
+  } catch(e) {}
+}
 
+async function newSession() {
+  const res = await axios.post(`${API}/chat/sessions/new`, { first_message: "" });
+  setCurrentSessionId(res.data.session_id);
+  setMessages([]); setReply(""); setStreamingReply("");
+  await loadSessions();
+}
+
+async function loadSession(session_id: string) {
+  setCurrentSessionId(session_id);
+  setStreamingReply(""); setReply("");
+  const res = await axios.get(`${API}/chat/sessions/${session_id}`);
+  setMessages(res.data.messages || []);
+}
+
+async function deleteSession(session_id: string, e: React.MouseEvent) {
+  e.stopPropagation();
+  await axios.delete(`${API}/chat/sessions/${session_id}`);
+  if (currentSessionId === session_id) { setCurrentSessionId(null); setMessages([]); }
+  await loadSessions();
+}
+
+ const handleAsk = async () => {
+  if (!chat.trim()) return;
+  let sessionId = currentSessionId;
+  if (!sessionId) {
+    const res = await axios.post(`${API}/chat/sessions/new`, { first_message: chat });
+    sessionId = res.data.session_id;
+    setCurrentSessionId(sessionId);
+    await loadSessions();
+  }
+  const userMsg = chat.trim();
+  setMessages(prev => [...prev, { role: "user", content: userMsg }]);
+  setChatLoading(true); setStreamingReply(""); setReply(""); setChat("");
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message: chat, stream: true }),
+    body: JSON.stringify({ message: userMsg, session_id: sessionId, stream: true }),
   });
-
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let accumulated = "";
-
-  setChat("");
   setChatLoading(false);
-
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-
-    const chunk = decoder.decode(value);
-    const lines = chunk.split("\n");
-
+    const lines = decoder.decode(value).split("\n");
     for (const line of lines) {
       if (line.startsWith("data: ") && line !== "data: [DONE]") {
         try {
           const parsed = JSON.parse(line.slice(6));
-          if (parsed.type === "text") {
-            accumulated += parsed.content;
-            setStreamingReply(accumulated);
-          } else if (parsed.type === "action_progress") {
-            // action hone pe dashboard refresh
-            fetchAll();
-          }
+          if (parsed.type === "text") { accumulated += parsed.content; setStreamingReply(accumulated); }
+          else if (parsed.type === "action_progress") { fetchAll(); }
         } catch {}
       }
     }
   }
-
-  setReply(accumulated);
+  setMessages(prev => [...prev, { role: "model", content: accumulated }]);
   setStreamingReply("");
+  await loadSessions();
 };
 
   if (loading) return (
@@ -1695,35 +1723,103 @@ export default function NerveDashboard() {
   </div>
 )}
 
-        {/* ── CHAT ── */}
-        <div className="fade6" style={{ background: "#080f1e", border: "1px solid #0d1f3c", borderRadius: 16, padding: "28px 28px" }}>
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 11, color: "#334155", letterSpacing: "4px", textTransform: "uppercase", fontFamily: "ui-monospace, 'SF Mono', Consolas, monospace", marginBottom: 4 }}>Ask Nerve</div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: "#fff", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>Got a question about your finances? Just ask.</div>
-            <div style={{ fontSize: 12, color: "#334155", marginTop: 6, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>No finance degree needed. Ask in plain English and Nerve will explain what's happening and what to do.</div>
+       {/* ── CHAT ── */}
+<div className="fade6" style={{ display: "flex", gap: 0, background: "#080f1e", border: "1px solid #0d1f3c", borderRadius: 16, overflow: "hidden", minHeight: 500 }}>
+
+  {/* SIDEBAR — threads */}
+  <div style={{ width: sidebarOpen ? 220 : 0, minWidth: sidebarOpen ? 220 : 0, background: "#050c1a", borderRight: "1px solid #0d1f3c", transition: "all 0.3s ease", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+    <div style={{ padding: "16px 14px 10px", borderBottom: "1px solid #0d1f3c" }}>
+      <button onClick={newSession} style={{ width: "100%", padding: "9px 12px", background: "#1d4ed8", border: "none", borderRadius: 8, color: "#fff", fontSize: 11, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, letterSpacing: "1px" }}>
+        + NEW CHAT
+      </button>
+    </div>
+    <div style={{ flex: 1, overflowY: "auto", padding: "8px 8px" }}>
+      {sessions.length === 0 && (
+        <div style={{ fontSize: 10, color: "#1e3a5f", padding: "12px 6px", textAlign: "center" }}>No chats yet</div>
+      )}
+      {sessions.map((s) => (
+        <div key={s.session_id} onClick={() => loadSession(s.session_id)}
+          style={{ padding: "9px 10px", borderRadius: 8, cursor: "pointer", marginBottom: 4, background: currentSessionId === s.session_id ? "rgba(29,78,216,0.15)" : "transparent", border: currentSessionId === s.session_id ? "1px solid #1d4ed820" : "1px solid transparent", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, transition: "all 0.15s" }}>
+          <div style={{ fontSize: 11, color: currentSessionId === s.session_id ? "#93c5fd" : "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+            {s.title || "Untitled"}
           </div>
-          <div style={{ display: "flex", gap: 12 }}>
-            <input value={chat} onChange={(e) => setChat(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAsk()}
-              placeholder="Why is my profit dropping? Should I run a sale? How do I fix my cash flow?"
-              style={{ flex: 1, background: "#0a1322", border: "1px solid #1e3a5f", borderRadius: 10, padding: "13px 18px", color: "#e2e8f0", fontSize: 12, fontFamily: "inherit", outline: "none" }}
-            />
-            <button onClick={handleAsk} disabled={chatLoading} style={{ padding: "13px 28px", background: chatLoading ? "#0d1f3c" : "#1d4ed8", border: "none", borderRadius: 10, color: "#fff", fontSize: 12, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", transition: "all 0.2s" }}>
-              {chatLoading ? "Thinking..." : "Ask Nerve →"}
-            </button>
-          </div>
-       {(reply || streamingReply) && (
-  <div style={{ marginTop: 16, padding: "20px 22px", background: "#0a1322", border: "1px solid #1e3a5f", borderRadius: 10 }}>
-    <div style={{ fontSize: 9, color: "#334155", letterSpacing: "3px", marginBottom: 10, fontFamily: "ui-monospace, 'SF Mono', Consolas, monospace" }}>NERVE SAYS</div>
-    <div style={{ fontSize: 13, color: "#cbd5e1", lineHeight: 1.8, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
-      {streamingReply || reply}
-      {streamingReply && <span style={{ borderRight: "2px solid #60a5fa", marginLeft: 2, animation: "pulse 1s infinite" }} />}
+          <button onClick={(e) => deleteSession(s.session_id, e)}
+            style={{ background: "none", border: "none", color: "#1e3a5f", cursor: "pointer", fontSize: 12, padding: "0 2px", flexShrink: 0, lineHeight: 1 }}>
+            ×
+          </button>
+        </div>
+      ))}
     </div>
   </div>
-)}
-          <div style={{ marginTop: 12, fontSize: 10, color: "#1e3a5f", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
-            Powered by Gemini 2.5 Flash · Connected to your live Stripe + Shopify data
+
+  {/* MAIN CHAT AREA */}
+  <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+
+    {/* Chat header */}
+    <div style={{ padding: "16px 20px 12px", borderBottom: "1px solid #0d1f3c", display: "flex", alignItems: "center", gap: 12 }}>
+      <button onClick={() => setSidebarOpen(o => !o)} style={{ background: "none", border: "1px solid #0d1f3c", borderRadius: 6, color: "#475569", cursor: "pointer", padding: "4px 8px", fontSize: 14 }}>
+        {sidebarOpen ? "◀" : "▶"}
+      </button>
+      <div>
+        <div style={{ fontSize: 11, color: "#334155", letterSpacing: "4px", textTransform: "uppercase", fontFamily: "ui-monospace, monospace" }}>Ask Nerve</div>
+        <div style={{ fontSize: 15, fontWeight: 800, color: "#fff", fontFamily: "-apple-system, sans-serif" }}>Got a question about your finances? Just ask.</div>
+      </div>
+    </div>
+
+    {/* Messages */}
+    <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12, minHeight: 280, maxHeight: 380 }}>
+      {messages.length === 0 && !streamingReply && (
+        <div style={{ textAlign: "center", color: "#1e3a5f", fontSize: 12, marginTop: 40, fontFamily: "ui-monospace, monospace" }}>
+          Start a conversation — ask about zombie SKUs, cash flow, margins...
+        </div>
+      )}
+      {messages.map((m, i) => (
+        <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
+          <div style={{
+            maxWidth: "80%", padding: "10px 14px", borderRadius: 10, fontSize: 12, lineHeight: 1.7, fontFamily: "-apple-system, sans-serif",
+            background: m.role === "user" ? "#1d4ed8" : "#0a1322",
+            color: m.role === "user" ? "#fff" : "#cbd5e1",
+            border: m.role === "user" ? "none" : "1px solid #1e3a5f"
+          }}>
+            {m.content}
           </div>
         </div>
+      ))}
+      {streamingReply && (
+        <div style={{ display: "flex", justifyContent: "flex-start" }}>
+          <div style={{ maxWidth: "80%", padding: "10px 14px", borderRadius: 10, fontSize: 12, lineHeight: 1.7, background: "#0a1322", color: "#cbd5e1", border: "1px solid #1e3a5f", fontFamily: "-apple-system, sans-serif" }}>
+            {streamingReply}
+            <span style={{ borderRight: "2px solid #60a5fa", marginLeft: 2, animation: "pulse 1s infinite" }} />
+          </div>
+        </div>
+      )}
+      {chatLoading && !streamingReply && (
+        <div style={{ display: "flex", justifyContent: "flex-start" }}>
+          <div style={{ padding: "10px 14px", borderRadius: 10, fontSize: 11, background: "#0a1322", color: "#334155", border: "1px solid #0d1f3c", fontFamily: "ui-monospace, monospace", letterSpacing: "2px" }}>
+            NERVE THINKING...
+          </div>
+        </div>
+      )}
+    </div>
+
+    {/* Input */}
+    <div style={{ padding: "12px 20px 16px", borderTop: "1px solid #0d1f3c" }}>
+      <div style={{ display: "flex", gap: 10 }}>
+        <input value={chat} onChange={(e) => setChat(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAsk()}
+          placeholder="Why is my profit dropping? Unpublish zombie SKUs..."
+          style={{ flex: 1, background: "#0a1322", border: "1px solid #1e3a5f", borderRadius: 10, padding: "11px 16px", color: "#e2e8f0", fontSize: 12, fontFamily: "inherit", outline: "none" }}
+        />
+        <button onClick={handleAsk} disabled={chatLoading}
+          style={{ padding: "11px 24px", background: chatLoading ? "#0d1f3c" : "#1d4ed8", border: "none", borderRadius: 10, color: "#fff", fontSize: 12, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", transition: "all 0.2s" }}>
+          {chatLoading ? "..." : "Send →"}
+        </button>
+      </div>
+      <div style={{ marginTop: 8, fontSize: 10, color: "#1e3a5f" }}>
+        Powered by Gemini 2.5 Flash · Connected to your live Stripe + Shopify data
+      </div>
+    </div>
+  </div>
+</div>
 
       </div>
 
