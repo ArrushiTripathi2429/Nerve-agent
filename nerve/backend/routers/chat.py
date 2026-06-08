@@ -1,16 +1,15 @@
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from google.cloud import bigquery
 from google import genai
 from google.genai import types
-from fastapi.responses import StreamingResponse
 import requests
 import os
 import json
 import asyncio
 import uuid
 from datetime import datetime, timezone
+from google.cloud import bigquery
 
 from dotenv import load_dotenv
 import pathlib
@@ -19,7 +18,7 @@ load_dotenv(pathlib.Path(__file__).parent.parent / ".env")
 
 router = APIRouter()
 
-# Vertex AI client
+# Vertex AI client — uses Cloud Run service account (no API key needed)
 ai_client = genai.Client(
     vertexai=True,
     project="nerve-agent-496707",
@@ -38,49 +37,34 @@ SHOPIFY_HEADERS = {
 
 # ─── TOOL FUNCTIONS ───────────────────────────────────────────
 
+from routers.signals import get_all_signals as _get_cached_signals
+
 def get_financial_signals() -> dict:
     try:
-        zombie_query = f"""
-            SELECT product_name, sku_id, inventory_units, unit_cost,
-                   inventory_units * unit_cost AS locked_capital,
-                   DATE_DIFF(CURRENT_DATE(), last_sold_date, DAY) AS days_since_sold
-            FROM `{DATASET}.shopify_inventory`
-            WHERE DATE_DIFF(CURRENT_DATE(), last_sold_date, DAY) >= 30
-            ORDER BY locked_capital DESC LIMIT 5
-        """
-        zombies = [dict(r) for r in bq_client.query(zombie_query).result()]
-
-        cash_query = f"""
-            SELECT bank_balance, upcoming_payroll, upcoming_rent,
-                   upcoming_gst, pending_receivable, daily_burn_rate
-            FROM `{DATASET}.cash_flow`
-            ORDER BY date DESC LIMIT 1
-        """
-        cash = [dict(r) for r in bq_client.query(cash_query).result()]
-
-        margin_query = f"""
-            WITH recent AS (
-                SELECT SUM(revenue) AS rev, SUM(cost_price) AS cost
-                FROM `{DATASET}.shopify_orders`
-                WHERE order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
-            ),
-            previous AS (
-                SELECT SUM(revenue) AS rev, SUM(cost_price) AS cost
-                FROM `{DATASET}.shopify_orders`
-                WHERE order_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 60 DAY)
-                    AND DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
-            )
-            SELECT
-                ROUND((recent.rev - recent.cost) / NULLIF(recent.rev,0) * 100, 1) AS current_margin,
-                ROUND((previous.rev - previous.cost) / NULLIF(previous.rev,0) * 100, 1) AS previous_margin
-            FROM recent, previous
-        """
-        margin = [dict(r) for r in bq_client.query(margin_query).result()]
-
+        data = _get_cached_signals()
+        signals = data.get("signals", {})
+        # Extract the most useful numbers for the agent
         return {
-            "zombie_skus": zombies,
-            "cash_flow": cash[0] if cash else {},
-            "margin": margin[0] if margin else {}
+            "zombie_skus": signals.get("zombie_sku", {}).get("zombies", [])[:5],
+            "cash_flow": {
+                "bank_balance": signals.get("cash_cliff", {}).get("bank_balance", 0),
+                "runway_days": signals.get("cash_cliff", {}).get("runway_days", 0),
+                "daily_burn_rate": signals.get("cash_cliff", {}).get("daily_burn_rate", 0),
+            },
+            "margin": {
+                "current_margin": signals.get("margin_drift", {}).get("current_margin", 0),
+                "previous_margin": signals.get("margin_drift", {}).get("previous_margin", 0),
+                "drift": signals.get("margin_drift", {}).get("drift", 0),
+            },
+            "phantom_liability": {
+                "total_unbilled": signals.get("phantom_liability", {}).get("total_unbilled", 0),
+                "true_cash": signals.get("phantom_liability", {}).get("true_cash", 0),
+            },
+            "summary": {
+                "silent_killer_score": None,
+                "zombie_locked_capital": signals.get("zombie_sku", {}).get("total_locked_capital", 0),
+                "upcoming_bills": signals.get("inventory_collision", {}).get("upcoming_bills", 0),
+            }
         }
     except Exception as e:
         return {"error": str(e)}
@@ -291,16 +275,10 @@ def list_sessions() -> list:
 
 
 def generate_title(message: str) -> str:
-    """Generate short title from first message using Gemini"""
-    try:
-        response = ai_client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=f"Generate a very short title (max 5 words) for a chat that starts with: '{message}'. Return only the title, nothing else.",
-            config=types.GenerateContentConfig(temperature=0.3, max_output_tokens=20)
-        )
-        return response.text.strip().strip('"')
-    except:
-        return message[:40] + "..." if len(message) > 40 else message
+    """Generate short title from the first message — no API call needed."""
+    words = message.strip().split()
+    title = " ".join(words[:6])
+    return (title + "...") if len(words) > 6 else title
 
 
 # ─── REQUEST MODELS ───────────────────────────────────────────
@@ -411,13 +389,16 @@ async def chat_stream(req: ChatRequest):
             function_calls = [p for p in parts if p.function_call]
 
             if not function_calls:
-                # Stream final text word by word
+                # Stream final text — send in chunks for low latency
                 final_text = "".join(p.text for p in parts if p.text)
                 final_reply = final_text
+                # Send in ~5-word chunks for snappy appearance
                 words = final_text.split(" ")
-                for word in words:
-                    yield f"data: {json.dumps({'type': 'text', 'content': word + ' '})}\n\n"
-                    await asyncio.sleep(0.04)
+                chunk_size = 4
+                for i in range(0, len(words), chunk_size):
+                    chunk = " ".join(words[i:i+chunk_size]) + " "
+                    yield f"data: {json.dumps({'type': 'text', 'content': chunk})}\n\n"
+                    await asyncio.sleep(0.02)
 
                 if actions_taken:
                     yield f"data: {json.dumps({'type': 'actions', 'actions': actions_taken})}\n\n"

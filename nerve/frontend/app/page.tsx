@@ -5,7 +5,8 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from "recharts";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+// All API calls go through Next.js proxy routes to avoid CORS issues
+const API = "";
 
 type Signal = { status: string; severity: number; alert: string; [key: string]: any; };
 type ScoreData = { silent_killer_score: number; risk_level: string; cross_signal_reason: string | null; cross_signal_bonus: number; signals: { [key: string]: Signal }; };
@@ -76,7 +77,7 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
   async function fetchAll() {
     setLoading(true);
     try {
-      const [s, f] = await Promise.all([axios.get(`${API}/score`), axios.get(`${API}/fivetran/sync`)]);
+      const [s, f] = await Promise.all([axios.get(`/api/score`), axios.get(`/api/fivetran`)]);
       setScore(s.data); setFivetran(f.data);
     } catch (e) { console.error(e); }
     setLoading(false);
@@ -86,7 +87,7 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
 
   async function runWhatIf() {
     try {
-      const res = await axios.post(`${API}/whatif`, { ad_spend_change: adSpend, return_rate_change: 0, pause_zombie_sku: pauseZombie, delay_payment_days: delayPayment });
+      const res = await axios.post(`/api/whatif`, { ad_spend_change: adSpend, return_rate_change: 0, pause_zombie_sku: pauseZombie, delay_payment_days: delayPayment });
       setWhatif(res.data);
     } catch (e) {}
   }
@@ -94,7 +95,7 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
   async function executeAction(id: string) {
     setExecuting(id);
     try {
-      const res = await axios.post(`${API}/execute`, { action_id: id, confirmed: true });
+      const res = await axios.post(`/api/execute`, { action_id: id, confirmed: true });
       setExecuted((p) => ({ ...p, [id]: res.data }));
     } catch (e) {}
     setExecuting(null);
@@ -102,13 +103,13 @@ const [sidebarOpen, setSidebarOpen] = useState(true);
 
   async function loadSessions() {
   try {
-    const res = await axios.get(`${API}/chat/sessions`);
+    const res = await axios.get(`/api/sessions`);
     setSessions(res.data.sessions || []);
   } catch(e) {}
 }
 
 async function newSession() {
-  const res = await axios.post(`${API}/chat/sessions/new`, { first_message: "" });
+  const res = await axios.post(`/api/sessions/new`, { first_message: "" });
   setCurrentSessionId(res.data.session_id);
   setMessages([]); setReply(""); setStreamingReply("");
   await loadSessions();
@@ -117,13 +118,13 @@ async function newSession() {
 async function loadSession(session_id: string) {
   setCurrentSessionId(session_id);
   setStreamingReply(""); setReply("");
-  const res = await axios.get(`${API}/chat/sessions/${session_id}`);
+  const res = await axios.get(`/api/sessions/${session_id}`);
   setMessages(res.data.messages || []);
 }
 
 async function deleteSession(session_id: string, e: React.MouseEvent) {
   e.stopPropagation();
-  await axios.delete(`${API}/chat/sessions/${session_id}`);
+  await axios.delete(`/api/sessions/${session_id}`);
   if (currentSessionId === session_id) { setCurrentSessionId(null); setMessages([]); }
   await loadSessions();
 }
@@ -132,7 +133,7 @@ async function deleteSession(session_id: string, e: React.MouseEvent) {
   if (!chat.trim()) return;
   let sessionId = currentSessionId;
   if (!sessionId) {
-    const res = await axios.post(`${API}/chat/sessions/new`, { first_message: chat });
+    const res = await axios.post(`/api/sessions/new`, { first_message: chat });
     sessionId = res.data.session_id;
     setCurrentSessionId(sessionId);
     await loadSessions();
@@ -140,32 +141,64 @@ async function deleteSession(session_id: string, e: React.MouseEvent) {
   const userMsg = chat.trim();
   setMessages(prev => [...prev, { role: "user", content: userMsg }]);
   setChatLoading(true); setStreamingReply(""); setReply(""); setChat("");
-  const res = await fetch("/api/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message: userMsg, session_id: sessionId, stream: true }),
-  });
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let accumulated = "";
-  setChatLoading(false);
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    const lines = decoder.decode(value).split("\n");
-    for (const line of lines) {
-      if (line.startsWith("data: ") && line !== "data: [DONE]") {
-        try {
-          const parsed = JSON.parse(line.slice(6));
-          if (parsed.type === "text") { accumulated += parsed.content; setStreamingReply(accumulated); }
-          else if (parsed.type === "action_progress") { fetchAll(); }
-        } catch {}
+
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: userMsg, session_id: sessionId, stream: true }),
+    });
+
+    if (!res.ok || !res.body) {
+      setChatLoading(false);
+      setMessages(prev => [...prev, { role: "model", content: "Sorry, something went wrong. Please try again." }]);
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let accumulated = "";
+    let hasStarted = false;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split("\n");
+      for (const line of lines) {
+        if (line.startsWith("data: ") && line !== "data: [DONE]") {
+          try {
+            const parsed = JSON.parse(line.slice(6));
+            if (parsed.type === "text") {
+              if (!hasStarted) { setChatLoading(false); hasStarted = true; }
+              accumulated += parsed.content;
+              setStreamingReply(accumulated);
+            } else if (parsed.type === "action_progress") {
+              fetchAll();
+            } else if (parsed.type === "error") {
+              setChatLoading(false);
+              setMessages(prev => [...prev, { role: "model", content: `Error: ${parsed.content}` }]);
+              setStreamingReply("");
+              await loadSessions();
+              return;
+            }
+          } catch {}
+        }
       }
     }
+
+    setChatLoading(false);
+    if (accumulated) {
+      setMessages(prev => [...prev, { role: "model", content: accumulated }]);
+    }
+    setStreamingReply("");
+    await loadSessions();
+
+  } catch (err) {
+    setChatLoading(false);
+    setStreamingReply("");
+    setMessages(prev => [...prev, { role: "model", content: "Connection error. Please try again." }]);
   }
-  setMessages(prev => [...prev, { role: "model", content: accumulated }]);
-  setStreamingReply("");
-  await loadSessions();
 };
 
   if (loading) return (
